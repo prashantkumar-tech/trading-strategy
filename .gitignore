@@ -1,0 +1,23 @@
+# Database
+db/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Streamlit
+.streamlit/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
