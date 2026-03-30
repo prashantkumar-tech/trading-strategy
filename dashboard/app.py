@@ -498,7 +498,7 @@ with st.expander("Configure Parameter Ranges", expanded=True):
 
     st.caption(
         "Below-MA50 position size is automatically set to half the above-MA50 value. "
-        "All combinations are tested against both SPY and SSO over the selected date range."
+        "All combinations are tested against SPY, SSO, and SPXL over the selected date range."
     )
 
     # Preview combo count
@@ -506,7 +506,7 @@ with st.expander("Configure Parameter Ranges", expanded=True):
     _profit_vals = list(np.arange(profit_min, profit_max + profit_step * 0.01, profit_step))
     _days_vals   = list(range(int(days_min), int(days_max) + 1, max(1, int(days_step))))
     _n_combos = len(_above_vals) * len(_profit_vals) * len(_days_vals)
-    st.info(f"**{_n_combos} combinations** × 2 symbols = **{_n_combos * 2} backtests**")
+    st.info(f"**{_n_combos} combinations** × 3 symbols = **{_n_combos * 3} backtests**")
 
 opt_col, _ = st.columns([1, 3])
 with opt_col:
@@ -524,7 +524,7 @@ if opt_btn:
         st.warning(f"Only {n_combos} combinations — widen the ranges to get at least 10.")
     else:
         results = {}
-        for sym in ["SPY", "SSO"]:
+        for sym in ["SPY", "SSO", "SPXL"]:
             df_sym = load_prices(sym, start=str(start_date), end=str(end_date))
             if df_sym.empty:
                 st.warning(f"No data for {sym} — skipping.")
@@ -601,41 +601,31 @@ if opt_btn:
 
             # ── Head-to-Head tab ──────────────────────────────────────────
             with sym_tabs[-1]:
-                if len(results) == 2:
-                    st.subheader("Best scenario per metric — SPY vs SSO")
-                    spy_res = results["SPY"]
-                    sso_res = results["SSO"]
+                if len(results) < 2:
+                    st.info("Need at least 2 symbols to show head-to-head comparison.")
+                else:
+                    st.subheader("Best scenario per metric — " + " vs ".join(results.keys()))
 
-                    metrics_compare = [
-                        ("Highest Sharpe",       "sharpe",         spy_res["sharpe"].idxmax(),         sso_res["sharpe"].idxmax()),
-                        ("Highest Total Return",  "total_return_%", spy_res["total_return_%"].idxmax(), sso_res["total_return_%"].idxmax()),
-                        ("Smallest Drawdown",     "max_drawdown_%", spy_res["max_drawdown_%"].idxmax(), sso_res["max_drawdown_%"].idxmax()),
-                        ("Best Win Rate",         "win_rate_%",     spy_res["win_rate_%"].idxmax(),     sso_res["win_rate_%"].idxmax()),
+                    metric_defs = [
+                        ("Highest Sharpe",      "sharpe",         "idxmax"),
+                        ("Highest Total Return", "total_return_%", "idxmax"),
+                        ("Smallest Drawdown",    "max_drawdown_%", "idxmax"),
+                        ("Best Win Rate",        "win_rate_%",     "idxmax"),
                     ]
 
-                    for metric_label, col, spy_idx, sso_idx in metrics_compare:
+                    for metric_label, col, agg in metric_defs:
                         st.markdown(f"**{metric_label}**")
-                        hr1, hr2 = st.columns(2)
-                        spy_row = spy_res.loc[spy_idx]
-                        sso_row = sso_res.loc[sso_idx]
-                        with hr1:
-                            st.markdown("**SPY**")
-                            st.json({
-                                "above_MA50_%":    int(spy_row["above_MA50_%"]),
-                                "below_MA50_%":    int(spy_row["below_MA50_%"]),
-                                "profit_target_%": spy_row["profit_target_%"],
-                                "time_stop_days":  int(spy_row["time_stop_days"]),
-                                col:               spy_row[col],
-                            })
-                        with hr2:
-                            st.markdown("**SSO**")
-                            st.json({
-                                "above_MA50_%":    int(sso_row["above_MA50_%"]),
-                                "below_MA50_%":    int(sso_row["below_MA50_%"]),
-                                "profit_target_%": sso_row["profit_target_%"],
-                                "time_stop_days":  int(sso_row["time_stop_days"]),
-                                col:               sso_row[col],
-                            })
+                        cols = st.columns(len(results))
+                        for (sym, df_res), col_widget in zip(results.items(), cols):
+                            idx = getattr(df_res[col], agg)()
+                            row = df_res.loc[idx]
+                            with col_widget:
+                                st.markdown(f"**{sym}**")
+                                st.json({
+                                    "above_MA50_%":    int(row["above_MA50_%"]),
+                                    "below_MA50_%":    int(row["below_MA50_%"]),
+                                    "profit_target_%": row["profit_target_%"],
+                                    "time_stop_days":  int(row["time_stop_days"]),
+                                    col:               round(row[col], 3),
+                                })
                         st.divider()
-                else:
-                    st.info("Need both SPY and SSO data to show head-to-head comparison.")
