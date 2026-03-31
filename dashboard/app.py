@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.fetcher import fetch_and_store
-from data.database import load_prices, list_symbols, init_db
+from data.fetcher import fetch_and_store, DEFAULT_SOURCE
+from data.database import load_prices, list_symbols, list_bar_sizes, init_db
 from backtest.simulator import run_backtest
 from backtest.optimizer import run_optimization
 
@@ -44,19 +44,40 @@ with st.sidebar:
     init_db()
     available = list_symbols()
 
-    # Symbol selector: dropdown of stored symbols + manual entry
     if available:
         symbol = st.selectbox("Active symbol", available,
                               index=available.index("SPY") if "SPY" in available else 0)
     else:
         symbol = "SPY"
 
-    new_sym = st.text_input("Add new symbol", placeholder="e.g. SSO, QQQ")
+    # Bar size selector — shows only sizes stored for this symbol
+    stored_bar_sizes = list_bar_sizes(symbol) if available else ["1d"]
+    bar_size = st.selectbox(
+        "Bar size",
+        options=["1d", "5m", "15m", "1h"],
+        index=0 if "1d" in stored_bar_sizes else 0,
+        help="Daily bars come from Yahoo Finance. Intraday bars require Polygon.",
+    )
+    if bar_size not in stored_bar_sizes:
+        st.caption(f"No {bar_size} data for {symbol} yet — fetch it below.")
+
+    st.divider()
+    new_sym = st.text_input("Add / refresh symbol", placeholder="e.g. TQQQ, QQQ")
+    fetch_source = st.selectbox(
+        "Data source",
+        ["yfinance (daily)", "polygon (intraday)"],
+        help="yfinance for daily bars (free). Polygon for intraday (API key required).",
+    )
+    source_key = "yfinance" if "yfinance" in fetch_source else "polygon"
+
     if st.button("Fetch / Refresh", use_container_width=True):
         target = new_sym.upper().strip() if new_sym.strip() else symbol
-        with st.spinner(f"Downloading {target}..."):
-            fetch_and_store(target)
-        st.success(f"{target} data updated.")
+        with st.spinner(f"Downloading {target} ({bar_size}) via {source_key}..."):
+            try:
+                fetch_and_store(target, bar_size=bar_size, source=source_key)
+                st.success(f"{target} {bar_size} data updated.")
+            except Exception as e:
+                st.error(str(e))
         st.rerun()
 
     if available:
@@ -86,12 +107,12 @@ with st.sidebar:
 
 
 # ── Index Performance ─────────────────────────────────────────────────────────
-st.header(f"{symbol} Performance")
+st.header(f"{symbol} Performance ({bar_size})")
 
-_df_index = load_prices(symbol, start=str(start_date), end=str(end_date))
+_df_index = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size)
 
 if _df_index.empty:
-    st.info(f"No data for {symbol}. Type it in 'Add new symbol' and click Fetch.")
+    st.info(f"No {bar_size} data for {symbol}. Select the bar size and source above, then click Fetch.")
 else:
     _first    = _df_index["close"].iloc[0]
     _last     = _df_index["close"].iloc[-1]
@@ -358,9 +379,9 @@ if run_btn:
     elif not exit_rules:
         st.error("Add at least one Exit rule before running.")
     else:
-        df = load_prices(symbol, start=str(start_date), end=str(end_date))
+        df = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size)
         if df.empty:
-            st.error(f"No data for {symbol}. Fetch it first.")
+            st.error(f"No {bar_size} data for {symbol}. Fetch it first.")
         else:
             with st.spinner(f"Running backtest for {symbol}..."):
                 result = run_backtest(df, rules_to_run, initial_capital)
@@ -441,7 +462,7 @@ if run_btn:
 
             # SPY benchmark (only add if the active symbol is not SPY)
             if symbol != "SPY":
-                _df_spy = load_prices("SPY", start=str(start_date), end=str(end_date))
+                _df_spy = load_prices("SPY", start=str(start_date), end=str(end_date), bar_size=bar_size)
                 if not _df_spy.empty:
                     spy_values = _df_spy["close"] * (initial_capital / _df_spy["close"].iloc[0])
                     fig2.add_trace(go.Scatter(
@@ -525,7 +546,7 @@ if opt_btn:
     else:
         results = {}
         for sym in ["SPY", "SSO", "SPXL"]:
-            df_sym = load_prices(sym, start=str(start_date), end=str(end_date))
+            df_sym = load_prices(sym, start=str(start_date), end=str(end_date), bar_size=bar_size)
             if df_sym.empty:
                 st.warning(f"No data for {sym} — skipping.")
                 continue

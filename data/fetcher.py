@@ -1,39 +1,67 @@
-"""Fetch historical OHLCV data from Yahoo Finance and store in SQLite."""
+"""
+Data fetcher — orchestrates source selection, indicator calculation, and storage.
 
-import yfinance as yf
+Usage:
+    fetch_and_store("SPY")                          # daily via Yahoo Finance
+    fetch_and_store("SPY", bar_size="5m",
+                   source="polygon",
+                   start="2020-01-01")              # 5-min via Polygon
+"""
+
 import pandas as pd
 from data.database import init_db, upsert_prices
 from data.indicators import add_moving_averages
 
+# Available sources
+from data.sources import yfinance as _yf_source
+from data.sources import polygon  as _poly_source
 
-def fetch_and_store(symbol: str, period: str = "20y") -> pd.DataFrame:
+SOURCES = {
+    "yfinance": _yf_source,
+    "polygon":  _poly_source,
+}
+
+# Default source per bar size
+DEFAULT_SOURCE = {
+    "1d":  "yfinance",
+    "5m":  "polygon",
+    "15m": "polygon",
+    "1m":  "polygon",
+    "30m": "polygon",
+    "1h":  "polygon",
+}
+
+
+def fetch_and_store(
+    symbol: str,
+    bar_size: str = "1d",
+    source: str = None,
+    start: str = None,
+    end: str = None,
+) -> pd.DataFrame:
     """
-    Download daily OHLCV for `symbol`, compute MAs, persist to DB.
-    Returns the cleaned DataFrame.
+    Download bars, compute indicators, and persist to SQLite.
+
+    Parameters
+    ----------
+    symbol   : ticker, e.g. "SPY"
+    bar_size : "1d" | "5m" | "15m" | "1m" | "30m" | "1h"
+    source   : "yfinance" | "polygon"  (auto-selected if None)
+    start    : "YYYY-MM-DD"  (optional, source default if None)
+    end      : "YYYY-MM-DD"  (optional, today if None)
     """
-    print(f"Fetching {symbol} ({period})...")
-    ticker = yf.Ticker(symbol)
-    raw = ticker.history(period=period, interval="1d", auto_adjust=True)
+    if source is None:
+        source = DEFAULT_SOURCE.get(bar_size, "polygon")
 
-    if raw.empty:
-        raise ValueError(f"No data returned for {symbol}")
+    if source not in SOURCES:
+        raise ValueError(f"Unknown source '{source}'. Choose from: {list(SOURCES)}")
 
-    df = raw.reset_index()
-    df.columns = [c.lower() for c in df.columns]
-    df = df.rename(columns={"date": "date"})
-
-    # Keep only needed columns
-    df = df[["date", "open", "high", "low", "close", "volume"]].copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.date.astype(str)
-    df["symbol"] = symbol
+    print(f"Fetching {symbol} ({bar_size}) via {source}...")
+    df = SOURCES[source].fetch(symbol, bar_size=bar_size, start=start, end=end)
 
     df = add_moving_averages(df)
 
     init_db()
-    upsert_prices(df, symbol)
-    print(f"Stored {len(df)} rows for {symbol}.")
+    upsert_prices(df, symbol, bar_size=bar_size)
+    print(f"Stored {len(df):,} {bar_size} bars for {symbol}.")
     return df
-
-
-if __name__ == "__main__":
-    fetch_and_store("SPY")

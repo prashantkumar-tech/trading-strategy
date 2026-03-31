@@ -19,6 +19,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS prices (
                 symbol      TEXT    NOT NULL,
                 date        TEXT    NOT NULL,
+                bar_size    TEXT    NOT NULL DEFAULT '1d',
                 open        REAL    NOT NULL,
                 high        REAL    NOT NULL,
                 low         REAL    NOT NULL,
@@ -26,22 +27,35 @@ def init_db() -> None:
                 volume      INTEGER NOT NULL,
                 ma50        REAL,
                 ma200       REAL,
-                PRIMARY KEY (symbol, date)
+                PRIMARY KEY (symbol, date, bar_size)
             )
         """)
+        # Migrate existing tables that predate bar_size column
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(prices)").fetchall()]
+        if "bar_size" not in cols:
+            conn.execute("ALTER TABLE prices ADD COLUMN bar_size TEXT NOT NULL DEFAULT '1d'")
+            conn.execute("UPDATE prices SET bar_size = '1d' WHERE bar_size IS NULL OR bar_size = ''")
 
 
-def upsert_prices(df: pd.DataFrame, symbol: str) -> None:
-    """Delete existing rows for symbol then insert fresh data."""
+def upsert_prices(df: pd.DataFrame, symbol: str, bar_size: str = "1d") -> None:
+    """Delete existing rows for (symbol, bar_size) then insert fresh data."""
     with get_connection() as conn:
-        conn.execute("DELETE FROM prices WHERE symbol = ?", (symbol,))
+        conn.execute(
+            "DELETE FROM prices WHERE symbol = ? AND bar_size = ?",
+            (symbol, bar_size),
+        )
         df.to_sql("prices", conn, if_exists="append", index=False,
                   method="multi", chunksize=500)
 
 
-def load_prices(symbol: str, start: Optional[str] = None, end: Optional[str] = None) -> pd.DataFrame:
-    query = "SELECT * FROM prices WHERE symbol = ?"
-    params: list = [symbol]
+def load_prices(
+    symbol: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    bar_size: str = "1d",
+) -> pd.DataFrame:
+    query = "SELECT * FROM prices WHERE symbol = ? AND bar_size = ?"
+    params: list = [symbol, bar_size]
     if start:
         query += " AND date >= ?"
         params.append(start)
@@ -55,7 +69,25 @@ def load_prices(symbol: str, start: Optional[str] = None, end: Optional[str] = N
     return df
 
 
-def list_symbols() -> list[str]:
+def list_symbols(bar_size: Optional[str] = None) -> list:
     with get_connection() as conn:
-        rows = conn.execute("SELECT DISTINCT symbol FROM prices ORDER BY symbol").fetchall()
+        if bar_size:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM prices WHERE bar_size = ? ORDER BY symbol",
+                (bar_size,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM prices ORDER BY symbol"
+            ).fetchall()
+    return [r[0] for r in rows]
+
+
+def list_bar_sizes(symbol: str) -> list:
+    """Return which bar sizes are available for a symbol."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT bar_size FROM prices WHERE symbol = ? ORDER BY bar_size",
+            (symbol,),
+        ).fetchall()
     return [r[0] for r in rows]
