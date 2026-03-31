@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dashboard.shared import render_sidebar
-from data.database import load_prices, list_symbols
+from data.database import load_prices, list_symbols, get_date_range
 from backtest.optimizer import run_optimization
 
 st.set_page_config(page_title="Optimizer", layout="wide", page_icon="🎯")
@@ -18,8 +18,6 @@ st.title("🎯 Optimizer")
 cfg = render_sidebar()
 bar_size        = cfg["bar_size"]
 initial_capital = cfg["initial_capital"]
-start_date      = cfg["start_date"]
-end_date        = cfg["end_date"]
 
 st.caption("Sweeps all combinations of position size, profit target, and time stop. "
            "Optionally add intraday gap-up and premarket rules (requires 5m data).")
@@ -76,8 +74,27 @@ selected_symbols = st.multiselect(
     default=available[:1] if available else ["SPY"],
 )
 
-# Estimate combo count
+# ── Date range: auto-detected from DB for each symbol ────────────────────────
 import numpy as np
+
+if selected_symbols:
+    starts, ends = [], []
+    for sym in selected_symbols:
+        s, e = get_date_range(sym, bar_size)
+        if s:
+            starts.append(s)
+            ends.append(e)
+    opt_start = min(starts) if starts else None
+    opt_end   = max(ends)   if ends   else None
+    if opt_start:
+        st.info(f"Using data range **{opt_start}** → **{opt_end}** ({bar_size}) from the database.")
+    else:
+        st.warning(f"No {bar_size} data found for selected symbols. Fetch data first.")
+        opt_start = opt_end = None
+else:
+    opt_start = opt_end = None
+
+# Estimate combo count
 pos_vals = list(np.arange(pos_above_min, pos_above_max + pos_above_step, pos_above_step) / 100)
 pt_vals  = list(np.arange(pt_min, pt_max + pt_step, pt_step))
 ts_vals  = list(range(int(ts_min), int(ts_max) + 1, int(ts_step)))
@@ -87,13 +104,15 @@ st.caption(f"**{n_combos} combinations × {len(selected_symbols)} symbol(s) = {n
 if st.button("▶ Run Optimization", type="primary"):
     if not selected_symbols:
         st.error("Select at least one symbol.")
+    elif not opt_start:
+        st.error(f"No {bar_size} data in DB. Fetch symbols first.")
     else:
         all_results = {}
         progress    = st.progress(0)
         total       = len(selected_symbols)
 
         for idx, sym in enumerate(selected_symbols):
-            df = load_prices(sym, start=str(start_date), end=str(end_date), bar_size=bar_size)
+            df = load_prices(sym, start=opt_start, end=opt_end, bar_size=bar_size)
             if df.empty:
                 st.warning(f"No {bar_size} data for {sym} — skipping.")
                 continue

@@ -83,6 +83,16 @@ def list_symbols(bar_size: Optional[str] = None) -> list:
     return [r[0] for r in rows]
 
 
+def get_date_range(symbol: str, bar_size: str) -> tuple:
+    """Return (min_date_str, max_date_str) for the given symbol + bar_size, or (None, None)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT MIN(substr(date,1,10)), MAX(substr(date,1,10)) FROM prices WHERE symbol = ? AND bar_size = ?",
+            (symbol, bar_size),
+        ).fetchone()
+    return (row[0], row[1]) if row and row[0] else (None, None)
+
+
 def list_bar_sizes(symbol: str) -> list:
     """Return which bar sizes are available for a symbol."""
     with get_connection() as conn:
