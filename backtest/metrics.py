@@ -1,10 +1,11 @@
 """Performance metrics for a completed backtest."""
 
+from typing import List
 import numpy as np
 import pandas as pd
 
 
-def compute_metrics(equity_curve: pd.Series, trades: list[dict]) -> dict:
+def compute_metrics(equity_curve: pd.Series, trades: List[dict]) -> dict:
     """
     equity_curve: pd.Series indexed by date, values = portfolio value
     trades: list of dicts with keys entry_date, exit_date, pnl, return_pct
