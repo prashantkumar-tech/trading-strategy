@@ -150,6 +150,11 @@ def load_prices(
     end: Optional[str] = None,
     bar_size: str = "1d",
 ) -> pd.DataFrame:
+    if start and bar_size != "1d" and len(start) == 10:
+        start = f"{start} 00:00:00"
+    if end and bar_size != "1d" and len(end) == 10:
+        end = f"{end} 23:59:59"
+
     query = "SELECT * FROM prices WHERE symbol = ? AND bar_size = ?"
     params: list = [symbol, bar_size]
     if start:

@@ -166,10 +166,11 @@ def run_backtest(
     trades    = []
     equity_curve = []
     signals   = []   # (date, "BUY" | "SELL" | None)
+    last_entry_date = None
 
     for i, row in df.iterrows():
         prev = df.iloc[i - 1] if i > 0 else None
-        current_close = row["close"]
+        current_close = row["exec_close"] if "exec_close" in row.index else row["close"]
 
         # ── 1. Increment days_held only when a new trading day starts ──────
         current_date = row["_date_only"]
@@ -187,13 +188,17 @@ def run_backtest(
                                        / pos["entry_price"] * 100,
                 "days_held": pos["days_held"],
             }
-            if any(_eval_rule(r, row, prev, pos_ctx) for r in exit_rules):
-                to_close.append(pos)
+            triggered_rule = next(
+                (r for r in exit_rules if _eval_rule(r, row, prev, pos_ctx)),
+                None,
+            )
+            if triggered_rule is not None:
+                to_close.append((pos, triggered_rule.get("label", "")))
 
         # Collect closed trade records without cash yet — stamp after buys
         sell_signal = False
         day_trades = []
-        for pos in to_close:
+        for pos, exit_rule_label in to_close:
             proceeds = pos["shares"] * current_close
             cost     = pos["shares"] * pos["entry_price"]
             pnl      = proceeds - cost
@@ -209,31 +214,33 @@ def run_backtest(
                 "days_held":   pos["days_held"],
                 "pnl":         round(pnl, 2),
                 "return_pct":  round(pnl / cost * 100, 2),
-                "exit_rule":   pos.get("exit_trigger", ""),
+                "exit_rule":   exit_rule_label,
             })
 
         # ── 3. Evaluate entry rules (first match wins) ─────────────────────
         buy_signal = False
         positions_market_value = sum(p["shares"] * current_close for p in positions)
-        for entry_rule in entry_rules:
-            if _eval_rule(entry_rule, row, prev):
-                position_pct    = float(entry_rule.get("position_pct", 0.10))
-                portfolio_value = cash + positions_market_value
-                spend           = portfolio_value * position_pct
+        if last_entry_date != current_date:
+            for entry_rule in entry_rules:
+                if _eval_rule(entry_rule, row, prev):
+                    position_pct    = float(entry_rule.get("position_pct", 0.10))
+                    portfolio_value = cash + positions_market_value
+                    spend           = portfolio_value * position_pct
 
-                if cash >= spend > 0:
-                    shares = spend / current_close
-                    positions.append({
-                        "entry_price": current_close,
-                        "entry_date":  str(row["date"]),
-                        "shares":      shares,
-                        "days_held":   0,
-                        "rule_label":  entry_rule.get("label", ""),
-                    })
-                    cash -= spend
-                    positions_market_value += spend
-                    buy_signal = True
-                break   # only first matching entry rule fires
+                    if cash >= spend > 0:
+                        shares = spend / current_close
+                        positions.append({
+                            "entry_price": current_close,
+                            "entry_date":  str(row["date"]),
+                            "shares":      shares,
+                            "days_held":   0,
+                            "rule_label":  entry_rule.get("label", ""),
+                        })
+                        cash -= spend
+                        positions_market_value += spend
+                        buy_signal = True
+                        last_entry_date = current_date
+                    break   # only first matching entry rule fires
 
         # Stamp all of today's closed trades with true end-of-day cash
         for t in day_trades:
