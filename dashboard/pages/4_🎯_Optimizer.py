@@ -16,8 +16,15 @@ st.set_page_config(page_title="Optimizer", layout="wide", page_icon="🎯")
 st.title("🎯 Optimizer")
 
 cfg = render_sidebar()
-bar_size        = cfg["bar_size"]
 initial_capital = cfg["initial_capital"]
+
+bar_size = st.selectbox(
+    "Bar size for optimization",
+    options=["5m", "15m", "1h", "1d"],
+    index=0,
+    help="5m uses Polygon intraday data (~5 years). 1d uses Yahoo Finance daily data (~20 years).",
+    key="opt_bar_size",
+)
 
 st.caption("Sweeps all combinations of position size, profit target, and time stop. "
            "Optionally add intraday gap-up and premarket rules (requires 5m data).")
