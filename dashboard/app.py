@@ -517,17 +517,23 @@ with st.expander("Configure Parameter Ranges", expanded=True):
         days_max  = st.number_input("Max",  value=5, step=1, key="opt_days_max")
         days_step = st.number_input("Step", value=1, step=1, key="opt_days_step")
 
-    st.caption(
-        "Below-MA50 position size is automatically set to half the above-MA50 value. "
-        "All combinations are tested against SPY, SSO, SPXL, TQQQ, SPXU, SQQQ over the selected date range."
+    all_stored = list_symbols(bar_size=bar_size)
+    opt_symbols = st.multiselect(
+        "Symbols to optimise",
+        options=all_stored,
+        default=[s for s in ["SPY", "SSO", "SPXL"] if s in all_stored],
+        help="Only symbols with data for the selected bar size are shown.",
     )
+
+    st.caption("Below-MA50 position size is automatically set to half the above-MA50 value.")
 
     # Preview combo count
     _above_vals  = list(np.arange(above_min,  above_max  + above_step  * 0.01, above_step))
     _profit_vals = list(np.arange(profit_min, profit_max + profit_step * 0.01, profit_step))
     _days_vals   = list(range(int(days_min), int(days_max) + 1, max(1, int(days_step))))
-    _n_combos = len(_above_vals) * len(_profit_vals) * len(_days_vals)
-    st.info(f"**{_n_combos} combinations** × 6 symbols = **{_n_combos * 6} backtests**")
+    _n_combos    = len(_above_vals) * len(_profit_vals) * len(_days_vals)
+    _n_syms      = len(opt_symbols)
+    st.info(f"**{_n_combos} combinations** × **{_n_syms} symbol{'s' if _n_syms != 1 else ''}** = **{_n_combos * _n_syms} backtests**")
 
 opt_col, _ = st.columns([1, 3])
 with opt_col:
@@ -541,11 +547,13 @@ if opt_btn:
     days_vals   = list(range(int(days_min), int(days_max) + 1, max(1, int(days_step))))
 
     n_combos = len(above_vals) * len(profit_vals) * len(days_vals)
-    if n_combos < 10:
+    if not opt_symbols:
+        st.error("Select at least one symbol to optimise.")
+    elif n_combos < 10:
         st.warning(f"Only {n_combos} combinations — widen the ranges to get at least 10.")
     else:
         results = {}
-        for sym in ["SPY", "SSO", "SPXL", "TQQQ", "SPXU", "SQQQ"]:
+        for sym in opt_symbols:
             df_sym = load_prices(sym, start=str(start_date), end=str(end_date), bar_size=bar_size)
             if df_sym.empty:
                 st.warning(f"No data for {sym} — skipping.")
