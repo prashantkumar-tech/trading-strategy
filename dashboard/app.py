@@ -519,7 +519,7 @@ with st.expander("Configure Parameter Ranges", expanded=True):
 
     st.caption(
         "Below-MA50 position size is automatically set to half the above-MA50 value. "
-        "All combinations are tested against SPY, SSO, and SPXL over the selected date range."
+        "All combinations are tested against SPY, SSO, SPXL, TQQQ, SPXU, SQQQ over the selected date range."
     )
 
     # Preview combo count
@@ -527,7 +527,7 @@ with st.expander("Configure Parameter Ranges", expanded=True):
     _profit_vals = list(np.arange(profit_min, profit_max + profit_step * 0.01, profit_step))
     _days_vals   = list(range(int(days_min), int(days_max) + 1, max(1, int(days_step))))
     _n_combos = len(_above_vals) * len(_profit_vals) * len(_days_vals)
-    st.info(f"**{_n_combos} combinations** × 3 symbols = **{_n_combos * 3} backtests**")
+    st.info(f"**{_n_combos} combinations** × 6 symbols = **{_n_combos * 6} backtests**")
 
 opt_col, _ = st.columns([1, 3])
 with opt_col:
@@ -545,7 +545,7 @@ if opt_btn:
         st.warning(f"Only {n_combos} combinations — widen the ranges to get at least 10.")
     else:
         results = {}
-        for sym in ["SPY", "SSO", "SPXL"]:
+        for sym in ["SPY", "SSO", "SPXL", "TQQQ", "SPXU", "SQQQ"]:
             df_sym = load_prices(sym, start=str(start_date), end=str(end_date), bar_size=bar_size)
             if df_sym.empty:
                 st.warning(f"No data for {sym} — skipping.")
