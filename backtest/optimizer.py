@@ -8,9 +8,13 @@ Sweeps combinations of:
   - time_stop_days : max days to hold a position before forced exit
 """
 
+import os
 from itertools import product
+from concurrent.futures import ProcessPoolExecutor
 import pandas as pd
 from backtest.simulator import run_backtest
+
+_WORKER_DF = None
 
 
 def _build_rules(
@@ -73,6 +77,41 @@ def _build_rules(
     return rules
 
 
+def _init_worker(df: pd.DataFrame) -> None:
+    global _WORKER_DF
+    _WORKER_DF = df
+
+
+def _run_combo(args: tuple) -> dict:
+    pos_above, profit_target, time_stop, initial_capital, gap_up_rule, premarket_rule, gap_up_pct, premarket_pct = args
+    pos_below = round(pos_above / 2, 4)
+    rules = _build_rules(
+        pos_above,
+        pos_below,
+        profit_target,
+        int(time_stop),
+        gap_up_rule=gap_up_rule,
+        premarket_rule=premarket_rule,
+        gap_up_pct=gap_up_pct,
+        premarket_pct=premarket_pct,
+    )
+    result = run_backtest(_WORKER_DF, rules, initial_capital)
+    m = result["metrics"]
+    return {
+        "above_MA50_%":    int(round(pos_above * 100)),
+        "below_MA50_%":    int(round(pos_below * 100)),
+        "profit_target_%": float(profit_target),
+        "time_stop_days":  int(time_stop),
+        "total_return_%":  m["total_return_pct"],
+        "ann_return_%":    m["annualized_return_pct"],
+        "sharpe":          m["sharpe_ratio"],
+        "max_drawdown_%":  m["max_drawdown_pct"],
+        "win_rate_%":      m["win_rate_pct"],
+        "num_trades":      m["num_trades"],
+        "final_value":     result["final_value"],
+    }
+
+
 def run_optimization(
     df: pd.DataFrame,
     pos_pct_above_values: list,   # e.g. [0.08, 0.10, 0.12, 0.15]
@@ -83,35 +122,45 @@ def run_optimization(
     premarket_rule: bool = False,
     gap_up_pct: float = 0.10,
     premarket_pct: float = 0.05,
+    max_workers: int = None,
 ) -> pd.DataFrame:
     """
     Run all parameter combinations and return a results DataFrame
     sorted by Sharpe ratio descending.
     pos_pct_below is always set to half of pos_pct_above.
     """
-    rows = []
-    combos = list(product(pos_pct_above_values, profit_target_values, time_stop_values))
+    combos = list(product(
+        pos_pct_above_values,
+        profit_target_values,
+        time_stop_values,
+    ))
+    if not combos:
+        return pd.DataFrame()
 
-    for pos_above, profit_target, time_stop in combos:
-        pos_below = round(pos_above / 2, 4)
-        rules = _build_rules(pos_above, pos_below, profit_target, int(time_stop),
-                             gap_up_rule=gap_up_rule, premarket_rule=premarket_rule,
-                             gap_up_pct=gap_up_pct, premarket_pct=premarket_pct)
-        result = run_backtest(df, rules, initial_capital)
-        m = result["metrics"]
-        rows.append({
-            "above_MA50_%":    int(round(pos_above * 100)),
-            "below_MA50_%":    int(round(pos_below * 100)),
-            "profit_target_%": float(profit_target),
-            "time_stop_days":  int(time_stop),
-            "total_return_%":  m["total_return_pct"],
-            "ann_return_%":    m["annualized_return_pct"],
-            "sharpe":          m["sharpe_ratio"],
-            "max_drawdown_%":  m["max_drawdown_pct"],
-            "win_rate_%":      m["win_rate_pct"],
-            "num_trades":      m["num_trades"],
-            "final_value":     result["final_value"],
-        })
+    worker_args = [
+        (
+            pos_above,
+            profit_target,
+            time_stop,
+            initial_capital,
+            gap_up_rule,
+            premarket_rule,
+            gap_up_pct,
+            premarket_pct,
+        )
+        for pos_above, profit_target, time_stop in combos
+    ]
+
+    if max_workers is None:
+        max_workers = min(len(worker_args), os.cpu_count() or 1)
+
+    if max_workers <= 1:
+        global _WORKER_DF
+        _WORKER_DF = df
+        rows = [_run_combo(args) for args in worker_args]
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(df,)) as executor:
+            rows = list(executor.map(_run_combo, worker_args))
 
     df_results = pd.DataFrame(rows).sort_values("sharpe", ascending=False).reset_index(drop=True)
     df_results.index += 1   # rank starts at 1

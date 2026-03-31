@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dashboard.shared import render_sidebar
-from data.database import get_connection
+from data.database import load_dataset_inventory
 
 st.set_page_config(page_title="Trading Strategy", layout="wide", page_icon="📈")
 st.title("📈 Trading Strategy Backtester")
@@ -20,16 +20,7 @@ st.divider()
 # ── Data inventory ────────────────────────────────────────────────────────────
 st.subheader("Data Inventory")
 
-with get_connection() as conn:
-    df_inv = pd.read_sql_query("""
-        SELECT symbol, bar_size,
-               COUNT(*)                       AS bars,
-               MIN(substr(date,1,10))         AS from_date,
-               MAX(substr(date,1,10))         AS to_date
-        FROM prices
-        GROUP BY symbol, bar_size
-        ORDER BY symbol, bar_size
-    """, conn)
+df_inv = load_dataset_inventory()
 
 if df_inv.empty:
     st.info("No data yet. Go to **Market Data** and fetch a symbol.")

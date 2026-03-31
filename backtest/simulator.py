@@ -28,7 +28,7 @@ Market fields (same every row):
 
 Position fields (only valid in exit rules, evaluated per position):
   position_return_pct   (close - entry_price) / entry_price * 100
-  days_held             calendar trading days since entry (entry day = 1)
+  days_held             distinct trading days since entry (entry day = 1)
 
 Operators: >  <  >=  <=  ==  crosses_above  crosses_below
 
@@ -154,14 +154,8 @@ def run_backtest(
 
     # prev_day_close: last close of the previous calendar day
     df["_date_only"] = parsed.dt.date
-    dates = sorted(df["_date_only"].unique())
-    prev_close_map = {}
-    for i, d in enumerate(dates):
-        if i > 0:
-            prev_d = dates[i - 1]
-            prev_close_map[d] = df.loc[df["_date_only"] == prev_d, "close"].iloc[-1]
-        else:
-            prev_close_map[d] = np.nan
+    daily_close = df.groupby("_date_only", sort=True)["close"].last()
+    prev_close_map = daily_close.shift(1)
     df["prev_day_close"] = df["_date_only"].map(prev_close_map)
 
     entry_rules = [r for r in rules if r.get("type") == "entry"]
@@ -175,16 +169,21 @@ def run_backtest(
 
     for i, row in df.iterrows():
         prev = df.iloc[i - 1] if i > 0 else None
+        current_close = row["close"]
 
-        # ── 1. Increment days_held for all open positions ──────────────────
-        for pos in positions:
-            pos["days_held"] += 1
+        # ── 1. Increment days_held only when a new trading day starts ──────
+        current_date = row["_date_only"]
+        prev_date = prev["_date_only"] if prev is not None else None
+        is_new_trading_day = prev is None or current_date != prev_date
+        if is_new_trading_day:
+            for pos in positions:
+                pos["days_held"] += 1
 
         # ── 2. Evaluate exit rules for each position ───────────────────────
         to_close = []
         for pos in positions:
             pos_ctx = {
-                "position_return_pct": (row["close"] - pos["entry_price"])
+                "position_return_pct": (current_close - pos["entry_price"])
                                        / pos["entry_price"] * 100,
                 "days_held": pos["days_held"],
             }
@@ -195,7 +194,7 @@ def run_backtest(
         sell_signal = False
         day_trades = []
         for pos in to_close:
-            proceeds = pos["shares"] * row["close"]
+            proceeds = pos["shares"] * current_close
             cost     = pos["shares"] * pos["entry_price"]
             pnl      = proceeds - cost
             cash += proceeds
@@ -205,7 +204,7 @@ def run_backtest(
                 "entry_date":  pos["entry_date"],
                 "exit_date":   str(row["date"]),
                 "entry_price": round(pos["entry_price"], 4),
-                "exit_price":  round(row["close"], 4),
+                "exit_price":  round(current_close, 4),
                 "shares":      round(pos["shares"], 6),
                 "days_held":   pos["days_held"],
                 "pnl":         round(pnl, 2),
@@ -215,22 +214,24 @@ def run_backtest(
 
         # ── 3. Evaluate entry rules (first match wins) ─────────────────────
         buy_signal = False
+        positions_market_value = sum(p["shares"] * current_close for p in positions)
         for entry_rule in entry_rules:
             if _eval_rule(entry_rule, row, prev):
                 position_pct    = float(entry_rule.get("position_pct", 0.10))
-                portfolio_value = cash + sum(p["shares"] * row["close"] for p in positions)
+                portfolio_value = cash + positions_market_value
                 spend           = portfolio_value * position_pct
 
                 if cash >= spend > 0:
-                    shares = spend / row["close"]
+                    shares = spend / current_close
                     positions.append({
-                        "entry_price": row["close"],
+                        "entry_price": current_close,
                         "entry_date":  str(row["date"]),
                         "shares":      shares,
                         "days_held":   0,
                         "rule_label":  entry_rule.get("label", ""),
                     })
                     cash -= spend
+                    positions_market_value += spend
                     buy_signal = True
                 break   # only first matching entry rule fires
 
@@ -240,7 +241,7 @@ def run_backtest(
         trades.extend(day_trades)
 
         # ── 4. Record equity & signal ──────────────────────────────────────
-        portfolio_value = cash + sum(p["shares"] * row["close"] for p in positions)
+        portfolio_value = cash + positions_market_value
         equity_curve.append({"date": row["date"], "portfolio_value": portfolio_value})
 
         signal = ("BUY" if buy_signal else None) if not sell_signal else \

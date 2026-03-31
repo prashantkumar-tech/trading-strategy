@@ -11,13 +11,16 @@ def compute_metrics(equity_curve: pd.Series, trades: List[dict]) -> dict:
     trades: list of dicts with keys entry_date, exit_date, pnl, return_pct
     """
     daily_returns = equity_curve.pct_change().dropna()
+    index = pd.to_datetime(equity_curve.index)
+    trading_days = index.normalize().nunique() if len(index) else 0
+    periods_per_year = (len(index) / trading_days) * 252 if trading_days > 0 else 252
 
     total_return = (equity_curve.iloc[-1] / equity_curve.iloc[0] - 1) * 100
-    n_years = len(equity_curve) / 252
+    n_years = trading_days / 252 if trading_days > 0 else 0.0
     annualized_return = ((1 + total_return / 100) ** (1 / n_years) - 1) * 100 if n_years > 0 else 0.0
 
     sharpe = (
-        (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+        (daily_returns.mean() / daily_returns.std()) * np.sqrt(periods_per_year)
         if daily_returns.std() > 0 else 0.0
     )
 
