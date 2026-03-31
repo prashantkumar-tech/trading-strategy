@@ -488,6 +488,86 @@ if run_btn:
                 st.info("No completed trades in this period.")
 
 
+# ── Data Explorer ─────────────────────────────────────────────────────────────
+st.divider()
+st.header("Data Explorer")
+
+with st.expander("Browse raw price data", expanded=False):
+    from data.database import get_connection
+
+    # Summary table across all 5-min symbols
+    st.subheader("5-min Data Inventory")
+    with get_connection() as _conn:
+        _inv = pd.read_sql_query("""
+            SELECT symbol,
+                   COUNT(*)                          AS bars,
+                   MIN(substr(date,1,10))            AS from_date,
+                   MAX(substr(date,1,10))            AS to_date
+            FROM prices
+            WHERE bar_size = '5m'
+            GROUP BY symbol
+            ORDER BY symbol
+        """, _conn)
+    if _inv.empty:
+        st.info("No 5-min data yet. Fetch symbols using Polygon in the sidebar.")
+    else:
+        _inv["bars"] = _inv["bars"].map(lambda x: f"{x:,}")
+        st.dataframe(_inv, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # Interactive browser
+    st.subheader("Browse Bars")
+    de_col1, de_col2, de_col3 = st.columns(3)
+    with de_col1:
+        de_sym = st.selectbox("Symbol", list_symbols(), key="de_sym")
+    with de_col2:
+        de_bar = st.selectbox("Bar size", list_bar_sizes(de_sym) if de_sym else ["1d"], key="de_bar")
+    with de_col3:
+        de_rows = st.selectbox("Rows to show", [100, 500, 1000, 5000, "All"], key="de_rows")
+
+    de_start = st.date_input("From", value=pd.Timestamp("2024-01-01"), key="de_start")
+    de_end   = st.date_input("To",   value=pd.Timestamp.today(),       key="de_end")
+
+    if st.button("Load Data", key="de_load"):
+        de_df = load_prices(de_sym, start=str(de_start), end=str(de_end), bar_size=de_bar)
+        if de_df.empty:
+            st.warning(f"No {de_bar} data for {de_sym} in that range.")
+        else:
+            st.caption(f"{len(de_df):,} bars loaded — {str(de_df['date'].iloc[0])[:16]} → {str(de_df['date'].iloc[-1])[:16]}")
+
+            # Candlestick chart
+            de_fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                    row_heights=[0.75, 0.25],
+                                    subplot_titles=(f"{de_sym} ({de_bar})", "Volume"))
+            de_fig.add_trace(go.Candlestick(
+                x=de_df["date"], open=de_df["open"], high=de_df["high"],
+                low=de_df["low"], close=de_df["close"], name="Price",
+                increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
+            ), row=1, col=1)
+            if de_df["ma50"].notna().any():
+                de_fig.add_trace(go.Scatter(x=de_df["date"], y=de_df["ma50"],
+                                             line=dict(color="#f39c12", width=1), name="MA50"), row=1, col=1)
+            if de_df["ma200"].notna().any():
+                de_fig.add_trace(go.Scatter(x=de_df["date"], y=de_df["ma200"],
+                                             line=dict(color="#3498db", width=1), name="MA200"), row=1, col=1)
+            de_fig.add_trace(go.Bar(x=de_df["date"], y=de_df["volume"],
+                                     marker_color="#546e7a", showlegend=False), row=2, col=1)
+            de_fig.update_layout(height=500, template="plotly_dark",
+                                  xaxis_rangeslider_visible=False, margin=dict(t=30, b=20))
+            st.plotly_chart(de_fig, use_container_width=True)
+
+            # Raw table
+            show_n = len(de_df) if de_rows == "All" else int(de_rows)
+            display_df = de_df.head(show_n).copy()
+            display_df["date"] = display_df["date"].astype(str).str[:19]
+            for col in ["open", "high", "low", "close"]:
+                display_df[col] = display_df[col].map(lambda x: f"{x:.2f}")
+            display_df["volume"] = display_df["volume"].map(lambda x: f"{int(x):,}")
+            st.dataframe(display_df[["date","open","high","low","close","volume","ma50","ma200"]],
+                         use_container_width=True, hide_index=True)
+
+
 # ── Strategy Optimizer ────────────────────────────────────────────────────────
 st.divider()
 st.header("Strategy Optimizer")
