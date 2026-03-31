@@ -58,7 +58,8 @@ _NUMERIC_OPS = {
     "==": lambda a, b: a == b,
 }
 
-_MARKET_PREV_FIELDS = {"open", "high", "low", "close", "volume", "ma50", "ma200"}
+_MARKET_PREV_FIELDS = {"open", "high", "low", "close", "volume", "ma50", "ma200",
+                       "bar_minutes", "prev_day_close"}
 _POSITION_FIELDS = {"position_return_pct", "days_held"}
 
 
@@ -144,6 +145,24 @@ def run_backtest(
     dict with keys: equity_curve, trades, metrics, signals_df, final_value
     """
     df = df.dropna(subset=["ma50", "ma200"]).reset_index(drop=True)
+
+    # ── Pre-compute intraday context fields ───────────────────────────────────
+    # bar_minutes: minutes since midnight ET (e.g. 9:30 AM = 570, 9:45 AM = 585)
+    # Timestamps stored as ET strings "YYYY-MM-DD HH:MM:SS" after polygon fix.
+    parsed = pd.to_datetime(df["date"])
+    df["bar_minutes"] = parsed.dt.hour * 60 + parsed.dt.minute
+
+    # prev_day_close: last close of the previous calendar day
+    df["_date_only"] = parsed.dt.date
+    dates = sorted(df["_date_only"].unique())
+    prev_close_map = {}
+    for i, d in enumerate(dates):
+        if i > 0:
+            prev_d = dates[i - 1]
+            prev_close_map[d] = df.loc[df["_date_only"] == prev_d, "close"].iloc[-1]
+        else:
+            prev_close_map[d] = np.nan
+    df["prev_day_close"] = df["_date_only"].map(prev_close_map)
 
     entry_rules = [r for r in rules if r.get("type") == "entry"]
     exit_rules  = [r for r in rules if r.get("type") == "exit"]

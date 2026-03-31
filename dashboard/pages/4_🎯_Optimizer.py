@@ -22,7 +22,7 @@ start_date      = cfg["start_date"]
 end_date        = cfg["end_date"]
 
 st.caption("Sweeps all combinations of position size, profit target, and time stop. "
-           "Only the MA50 Momentum strategy is supported here.")
+           "Optionally add intraday gap-up and premarket rules (requires 5m data).")
 
 # ── Parameter controls ────────────────────────────────────────────────────────
 st.subheader("Parameters")
@@ -45,6 +45,28 @@ with col3:
     ts_min  = st.number_input("Min",  1, 20, 2, step=1, key="ts_min")
     ts_max  = st.number_input("Max",  1, 60, 6, step=1, key="ts_max")
     ts_step = st.number_input("Step", 1, 10, 1, step=1, key="ts_step")
+
+# ── Intraday rules (5m data only) ────────────────────────────────────────────
+st.subheader("Intraday Entry Rules")
+st.caption("These rules require 5-minute bar data with corrected Eastern Time timestamps. "
+           "Re-fetch symbols after updating to the latest version if timestamps look off.")
+id_col1, id_col2 = st.columns(2)
+
+with id_col1:
+    gap_up_rule = st.checkbox(
+        "Gap-up rule: if positive gap vs prev day close, buy at 9:45 AM",
+        value=False, key="gap_up_rule",
+    )
+    gap_up_pct = st.slider("Gap-up position size (%)", 1, 30, 10, key="gap_up_pct",
+                            disabled=not gap_up_rule)
+
+with id_col2:
+    premarket_rule = st.checkbox(
+        "Premarket rule: if price < prev day close during premarket, buy",
+        value=False, key="premarket_rule",
+    )
+    premarket_pct = st.slider("Premarket position size (%)", 1, 30, 5, key="premarket_pct",
+                               disabled=not premarket_rule)
 
 # ── Symbol multiselect ────────────────────────────────────────────────────────
 available = list_symbols()
@@ -76,7 +98,13 @@ if st.button("▶ Run Optimization", type="primary"):
                 st.warning(f"No {bar_size} data for {sym} — skipping.")
                 continue
             with st.spinner(f"Optimizing {sym} ({n_combos} combos)…"):
-                res = run_optimization(df, pos_vals, pt_vals, ts_vals, initial_capital)
+                res = run_optimization(
+                    df, pos_vals, pt_vals, ts_vals, initial_capital,
+                    gap_up_rule=gap_up_rule,
+                    premarket_rule=premarket_rule,
+                    gap_up_pct=gap_up_pct / 100,
+                    premarket_pct=premarket_pct / 100,
+                )
             all_results[sym] = res
             progress.progress((idx + 1) / total)
 

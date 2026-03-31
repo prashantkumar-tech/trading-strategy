@@ -2,8 +2,11 @@
 
 import os
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
+
+ET = ZoneInfo("America/New_York")
 import pandas as pd
 from polygon import RESTClient
 from dotenv import load_dotenv
@@ -91,8 +94,9 @@ def fetch(
 
 
 def _ts_to_str(timestamp_ms: int, bar_size: str) -> str:
-    """Convert Polygon millisecond timestamp to a sortable string."""
-    dt = datetime.utcfromtimestamp(timestamp_ms / 1000)
+    """Convert Polygon millisecond timestamp to Eastern Time string."""
+    dt_utc = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    dt_et  = dt_utc.astimezone(ET)
     if bar_size == "1d":
-        return dt.strftime("%Y-%m-%d")
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt_et.strftime("%Y-%m-%d")
+    return dt_et.strftime("%Y-%m-%d %H:%M:%S")

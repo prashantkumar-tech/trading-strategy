@@ -13,9 +13,17 @@ import pandas as pd
 from backtest.simulator import run_backtest
 
 
-def _build_rules(pos_pct_above: float, pos_pct_below: float,
-                  profit_target: float, time_stop_days: int) -> list:
-    return [
+def _build_rules(
+    pos_pct_above: float,
+    pos_pct_below: float,
+    profit_target: float,
+    time_stop_days: int,
+    gap_up_rule: bool = False,
+    premarket_rule: bool = False,
+    gap_up_pct: float = 0.10,
+    premarket_pct: float = 0.05,
+) -> list:
+    rules = [
         {
             "type": "entry", "label": "Above MA50", "combinator": "AND",
             "position_pct": pos_pct_above,
@@ -26,6 +34,31 @@ def _build_rules(pos_pct_above: float, pos_pct_below: float,
             "position_pct": pos_pct_below,
             "conditions": [{"left": "close", "op": "<=", "right": "ma50"}],
         },
+    ]
+
+    # Rule: if market gaps up from prev day close, buy 15 min after open (9:45 AM bar = 585 min)
+    if gap_up_rule:
+        rules.append({
+            "type": "entry", "label": "Gap Up — Buy at 9:45", "combinator": "AND",
+            "position_pct": gap_up_pct,
+            "conditions": [
+                {"left": "close",          "op": ">",  "right": "prev_day_close"},
+                {"left": "bar_minutes",    "op": "==", "right": "585"},
+            ],
+        })
+
+    # Rule: if premarket price is below prev day close, buy in premarket
+    if premarket_rule:
+        rules.append({
+            "type": "entry", "label": "Negative Premarket Buy", "combinator": "AND",
+            "position_pct": premarket_pct,
+            "conditions": [
+                {"left": "close",       "op": "<",  "right": "prev_day_close"},
+                {"left": "bar_minutes", "op": "<",  "right": "570"},   # before 9:30 AM ET
+            ],
+        })
+
+    rules += [
         {
             "type": "exit", "label": "Profit target", "combinator": "AND",
             "conditions": [{"left": "position_return_pct", "op": ">=",
@@ -37,6 +70,7 @@ def _build_rules(pos_pct_above: float, pos_pct_below: float,
                             "right": str(time_stop_days)}],
         },
     ]
+    return rules
 
 
 def run_optimization(
@@ -45,6 +79,10 @@ def run_optimization(
     profit_target_values: list,   # e.g. [1.5, 2.0, 2.5, 3.0]
     time_stop_values: list,       # e.g. [2, 3, 4, 5]
     initial_capital: float = 10_000.0,
+    gap_up_rule: bool = False,
+    premarket_rule: bool = False,
+    gap_up_pct: float = 0.10,
+    premarket_pct: float = 0.05,
 ) -> pd.DataFrame:
     """
     Run all parameter combinations and return a results DataFrame
@@ -56,7 +94,9 @@ def run_optimization(
 
     for pos_above, profit_target, time_stop in combos:
         pos_below = round(pos_above / 2, 4)
-        rules = _build_rules(pos_above, pos_below, profit_target, int(time_stop))
+        rules = _build_rules(pos_above, pos_below, profit_target, int(time_stop),
+                             gap_up_rule=gap_up_rule, premarket_rule=premarket_rule,
+                             gap_up_pct=gap_up_pct, premarket_pct=premarket_pct)
         result = run_backtest(df, rules, initial_capital)
         m = result["metrics"]
         rows.append({

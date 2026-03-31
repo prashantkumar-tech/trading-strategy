@@ -18,6 +18,7 @@ default_pos_pct = cfg["default_pos_pct"]
 ENTRY_FIELDS = [
     "close", "open", "high", "low", "ma50", "ma200", "volume",
     "close_prev", "open_prev", "ma50_prev", "ma200_prev",
+    "prev_day_close", "bar_minutes",
 ]
 EXIT_FIELDS = ENTRY_FIELDS + ["position_return_pct", "days_held"]
 OPS = [">", "<", ">=", "<=", "==", "crosses_above", "crosses_below"]
