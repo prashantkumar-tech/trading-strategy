@@ -15,10 +15,12 @@ from data.indicators import add_moving_averages
 # Available sources
 from data.sources import yfinance as _yf_source
 from data.sources import polygon  as _poly_source
+from data.sources import twelve_data as _twelve_source
 
 SOURCES = {
     "yfinance": _yf_source,
     "polygon":  _poly_source,
+    "twelve_data": _twelve_source,
 }
 
 # Default source per bar size
@@ -46,7 +48,7 @@ def fetch_and_store(
     ----------
     symbol   : ticker, e.g. "SPY"
     bar_size : "1d" | "5m" | "15m" | "1m" | "30m" | "1h"
-    source   : "yfinance" | "polygon"  (auto-selected if None)
+    source   : "yfinance" | "polygon" | "twelve_data" (auto-selected if None)
     start    : "YYYY-MM-DD"  (optional, source default if None)
     end      : "YYYY-MM-DD"  (optional, today if None)
     """
@@ -62,6 +64,6 @@ def fetch_and_store(
     df = add_moving_averages(df)
 
     init_db()
-    upsert_prices(df, symbol, bar_size=bar_size)
+    upsert_prices(df, symbol, bar_size=bar_size, source=source)
     print(f"Stored {len(df):,} {bar_size} bars for {symbol}.")
     return df

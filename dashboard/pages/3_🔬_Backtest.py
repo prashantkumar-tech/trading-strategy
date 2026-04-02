@@ -18,6 +18,7 @@ st.title("🔬 Backtest")
 cfg = render_sidebar()
 symbol          = cfg["symbol"]
 bar_size        = cfg["bar_size"]
+source          = cfg["source"]
 initial_capital = cfg["initial_capital"]
 start_date      = cfg["start_date"]
 end_date        = cfg["end_date"]
@@ -27,9 +28,9 @@ if not rules:
     st.warning(f"No rules for **{symbol}**. Go to **Strategy Builder** and add some first.")
     st.stop()
 
-df = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size)
+df = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size, source=source)
 if df.empty:
-    st.info(f"No {bar_size} data for {symbol}. Use the sidebar to fetch it.")
+    st.info(f"No {bar_size} data for {symbol} from {source}. Use the sidebar to fetch it.")
     st.stop()
 
 if st.button("▶ Run Backtest", type="primary", use_container_width=False):

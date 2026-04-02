@@ -17,6 +17,7 @@ st.title("🎯 Optimizer")
 
 cfg = render_sidebar()
 initial_capital = cfg["initial_capital"]
+default_source = cfg["source"]
 
 bar_size = st.selectbox(
     "Bar size for optimization",
@@ -75,10 +76,16 @@ with id_col2:
 
 # ── Symbol multiselect ────────────────────────────────────────────────────────
 available = list_symbols()
+opt_source = st.selectbox(
+    "Source for optimization",
+    options=["yfinance", "polygon", "twelve_data"],
+    index=["yfinance", "polygon", "twelve_data"].index(default_source) if default_source in ["yfinance", "polygon", "twelve_data"] else 1,
+    key="opt_source",
+)
 selected_symbols = st.multiselect(
     "Symbols to optimize",
-    options=available if available else ["SPY"],
-    default=available[:1] if available else ["SPY"],
+    options=list_symbols(source=opt_source) if available else ["SPY"],
+    default=(list_symbols(source=opt_source)[:1] if list_symbols(source=opt_source) else ["SPY"]),
 )
 
 # ── Date range: auto-detected from DB for each symbol ────────────────────────
@@ -87,7 +94,7 @@ import numpy as np
 if selected_symbols:
     starts, ends = [], []
     for sym in selected_symbols:
-        s, e = get_date_range(sym, bar_size)
+        s, e = get_date_range(sym, bar_size, source=opt_source)
         if s:
             starts.append(s)
             ends.append(e)
@@ -119,7 +126,7 @@ if st.button("▶ Run Optimization", type="primary"):
         total       = len(selected_symbols)
 
         for idx, sym in enumerate(selected_symbols):
-            df = load_prices(sym, start=opt_start, end=opt_end, bar_size=bar_size)
+            df = load_prices(sym, start=opt_start, end=opt_end, bar_size=bar_size, source=opt_source)
             if df.empty:
                 st.warning(f"No {bar_size} data for {sym} — skipping.")
                 continue

@@ -15,6 +15,7 @@ def init_state():
         "rules_by_symbol": {},
         "symbol":          "SPY",
         "bar_size":        "1d",
+        "source":          "yfinance",
         "initial_capital": 10_000,
         "default_pos_pct": 10,
         "start_date":      pd.Timestamp("2010-01-01").date(),
@@ -41,33 +42,53 @@ def render_sidebar():
             key="symbol",
         )
 
-        stored_bar_sizes = list_bar_sizes(symbol) if available else ["1d"]
+        bar_size_options = ["1d", "5m", "15m", "1h"]
         bar_size = st.selectbox(
             "Bar size",
-            options=["1d", "5m", "15m", "1h"],
-            index=["1d", "5m", "15m", "1h"].index(st.session_state.bar_size)
-                  if st.session_state.bar_size in ["1d", "5m", "15m", "1h"] else 0,
+            options=bar_size_options,
+            index=bar_size_options.index(st.session_state.bar_size)
+                  if st.session_state.bar_size in bar_size_options else 0,
             key="bar_size",
-            help="Daily = Yahoo Finance · Intraday = Polygon",
+            help="Choose the active timeframe for reads and fetches.",
         )
+
+        source_options = ["yfinance", "polygon", "twelve_data"] if bar_size == "1d" else ["polygon", "twelve_data"]
+        default_source = st.session_state.source if st.session_state.source in source_options else source_options[0]
+        source = st.selectbox(
+            "Active source",
+            options=source_options,
+            index=source_options.index(default_source),
+            key="source",
+        )
+
+        stored_bar_sizes = list_bar_sizes(symbol, source=source) if available else ["1d"]
         if bar_size not in stored_bar_sizes:
-            st.caption(f"No {bar_size} data for {symbol} yet — fetch below.")
+            st.caption(f"No {bar_size} data for {symbol} from {source} yet — fetch below.")
 
         new_sym = st.text_input("Add / refresh symbol", placeholder="e.g. TQQQ, QQQ")
         fetch_source = st.selectbox(
             "Source",
-            ["yfinance (daily)", "polygon (intraday)"],
+            [
+                "yfinance",
+                "polygon",
+                "twelve_data",
+            ],
         )
-        source_key = "yfinance" if "yfinance" in fetch_source else "polygon"
+        allowed_bar_sizes = ["1d"] if fetch_source == "yfinance" else ["1d", "5m", "15m", "1h"]
+        if bar_size not in allowed_bar_sizes:
+            st.caption(f"`{fetch_source}` does not support the current `{bar_size}` selection.")
 
         if st.button("Fetch / Refresh", use_container_width=True):
             target = new_sym.upper().strip() if new_sym.strip() else symbol
-            with st.spinner(f"Downloading {target} ({bar_size})..."):
-                try:
-                    fetch_and_store(target, bar_size=bar_size, source=source_key)
-                    st.success(f"{target} {bar_size} updated.")
-                except Exception as e:
-                    st.error(str(e))
+            if bar_size not in allowed_bar_sizes:
+                st.error(f"{fetch_source} does not support {bar_size}.")
+            else:
+                with st.spinner(f"Downloading {target} ({bar_size})..."):
+                    try:
+                        fetch_and_store(target, bar_size=bar_size, source=fetch_source)
+                        st.success(f"{target} {bar_size} updated from {fetch_source}.")
+                    except Exception as e:
+                        st.error(str(e))
             st.rerun()
 
         if available:
@@ -102,6 +123,7 @@ def render_sidebar():
     return dict(
         symbol=symbol,
         bar_size=bar_size,
+        source=source,
         initial_capital=initial_capital,
         default_pos_pct=default_pos_pct,
         start_date=start_date,

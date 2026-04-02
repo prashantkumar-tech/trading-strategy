@@ -18,16 +18,17 @@ st.title("📊 Market Data")
 cfg = render_sidebar()
 symbol        = cfg["symbol"]
 bar_size      = cfg["bar_size"]
+source        = cfg["source"]
 start_date    = cfg["start_date"]
 end_date      = cfg["end_date"]
 
 # ── Index Performance ─────────────────────────────────────────────────────────
-st.header(f"{symbol} — {bar_size} Performance")
+st.header(f"{symbol} — {bar_size} Performance ({source})")
 
-df = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size)
+df = load_prices(symbol, start=str(start_date), end=str(end_date), bar_size=bar_size, source=source)
 
 if df.empty:
-    st.info(f"No {bar_size} data for {symbol}. Use the sidebar to fetch it.")
+    st.info(f"No {bar_size} data for {symbol} from {source}. Use the sidebar to fetch it.")
     st.stop()
 
 first, last = df["close"].iloc[0], df["close"].iloc[-1]
@@ -71,19 +72,23 @@ st.header("Data Explorer")
 with st.expander("Browse raw bars", expanded=False):
     de_col1, de_col2, de_col3 = st.columns(3)
     with de_col1:
-        de_sym = st.selectbox("Symbol", list_symbols(), key="de_sym")
+        de_source = st.selectbox("Source", ["yfinance", "polygon", "twelve_data"], key="de_source")
     with de_col2:
-        de_bar = st.selectbox("Bar size", list_bar_sizes(de_sym) if de_sym else ["1d"], key="de_bar")
+        de_sym = st.selectbox("Symbol", list_symbols(source=de_source), key="de_sym")
     with de_col3:
+        de_bar = st.selectbox("Bar size", list_bar_sizes(de_sym, source=de_source) if de_sym else ["1d"], key="de_bar")
+
+    de_col4, = st.columns(1)
+    with de_col4:
         de_rows = st.selectbox("Rows to show", [100, 500, 1000, 5000, "All"], key="de_rows")
 
     de_start = st.date_input("From", value=pd.Timestamp("2024-01-01"), key="de_start")
     de_end   = st.date_input("To",   value=pd.Timestamp.today(),       key="de_end")
 
     if st.button("Load Data", key="de_load"):
-        de_df = load_prices(de_sym, start=str(de_start), end=str(de_end), bar_size=de_bar)
+        de_df = load_prices(de_sym, start=str(de_start), end=str(de_end), bar_size=de_bar, source=de_source)
         if de_df.empty:
-            st.warning(f"No {de_bar} data for {de_sym} in that range.")
+            st.warning(f"No {de_bar} data for {de_sym} from {de_source} in that range.")
         else:
             st.caption(f"{len(de_df):,} bars — {str(de_df['date'].iloc[0])[:16]} → {str(de_df['date'].iloc[-1])[:16]}")
 
