@@ -40,6 +40,12 @@ DATASETS = [
     ("SQQQ",  "5m", "polygon",  "2021-04-01"),
     ("SPXU",  "5m", "polygon",  "2021-04-01"),
     ("SSO",   "5m", "polygon",  "2021-04-01"),
+
+    # ── 5-minute bars (Twelve Data) ───────────────────────────────────────────
+    ("TQQQ",  "5m", "twelve_data", "2021-04-01"),
+    ("SPXL",  "5m", "twelve_data", "2021-04-01"),
+    ("QQQ",   "5m", "twelve_data", "2021-04-01"),
+    ("SPY",   "5m", "twelve_data", "2021-04-01"),
 ]
 
 

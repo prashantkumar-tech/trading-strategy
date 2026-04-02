@@ -43,6 +43,14 @@ def _build_fixed_window_rules(
     schedule_days = TIME_STOP_SCHEDULES[time_stop_schedule]
     return [
         {
+            "type": "entry", "label": "Negative Premarket Buy", "combinator": "AND",
+            "position_pct": pos_pct_below,
+            "conditions": [
+                {"left": "exec_close", "op": "<", "right": "prev_symbol_close"},
+                {"left": "bar_minutes", "op": "<", "right": "570"},
+            ],
+        },
+        {
             "type": "entry", "label": "Positive Open Above MA50", "combinator": "AND",
             "position_pct": pos_pct_above,
             "conditions": [
@@ -211,12 +219,15 @@ def _regular_session_reference(df: pd.DataFrame) -> pd.DataFrame:
 
 def _add_prev_day_close(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Attach prev_day_close to every bar using the full (including lookback) dataset
-    so the first bar of the study window has a valid previous-day close.
+    Attach prev_day_close (reference/SPY) and prev_symbol_close (TQQQ/SPXL)
+    to every bar using the full (including lookback) dataset so the first bar
+    of the study window has a valid previous-day close.
     """
     df = df.copy()
     ts = pd.to_datetime(df["date"])
     date_only = ts.dt.date
+
+    # Reference symbol (e.g. SPY) prev-day close — used by regular-session entry rules
     signal_close_source = "signal_day_close" if "signal_day_close" in df.columns else "close"
     daily_close = (
         df.assign(_d=date_only)
@@ -225,6 +236,21 @@ def _add_prev_day_close(df: pd.DataFrame) -> pd.DataFrame:
     )
     prev_close_map = daily_close.shift(1)
     df["prev_day_close"] = date_only.map(prev_close_map)
+
+    # Traded symbol (e.g. TQQQ) prev-day close — last regular-hours bar of prior day.
+    # Used by the pre-market entry rule so we compare TQQQ price to TQQQ prior close.
+    if "symbol_close" in df.columns:
+        minutes = ts.dt.hour * 60 + ts.dt.minute
+        rh_mask = (minutes >= REGULAR_OPEN_MINUTE) & (minutes <= REGULAR_CLOSE_MINUTE)
+        rh_symbol_close = (
+            df[rh_mask]
+            .assign(_d=date_only[rh_mask])
+            .groupby("_d", sort=True)["symbol_close"]
+            .last()
+        )
+        prev_symbol_map = rh_symbol_close.shift(1)
+        df["prev_symbol_close"] = date_only.map(prev_symbol_map)
+
     return df
 
 
@@ -362,8 +388,10 @@ def render_fixed_window_study(
     st.caption("Runs both a single backtest and a parameter sweep on a user-selected 5-minute window.")
     st.caption(f"Data source: **{data_source}**")
     st.info(
-        "Entry logic is fixed for this study: buy at 09:45 ET when the regular-session open is above the previous day's close. "
-        "Allocation is 10% when the reference open is above the reference 50DMA, otherwise 5%."
+        "Entry logic: (1) **Pre-market buy** — buy when any pre-market bar (before 09:30 ET) closes below the previous day's close; "
+        "(2) **Regular-session buy at 09:45 ET** — buy when the session open is above the previous day's close. "
+        "Allocation is 10% when the reference open is above the reference 50DMA, otherwise 5%. "
+        "Only one entry fires per day — pre-market takes priority if triggered."
     )
 
     with st.sidebar:
