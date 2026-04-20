@@ -134,16 +134,34 @@ def _create_datasets_table(conn: sqlite3.Connection) -> None:
     """)
 
 
-def upsert_prices(df: pd.DataFrame, symbol: str, bar_size: str = "1d", source: Optional[str] = None) -> None:
-    """Delete existing rows for (symbol, bar_size, source) then insert fresh data."""
+def upsert_prices(
+    df: pd.DataFrame,
+    symbol: str,
+    bar_size: str = "1d",
+    source: Optional[str] = None,
+    replace_from: Optional[str] = None,
+) -> None:
+    """Replace all rows or a trailing date range for a dataset, then insert fresh data."""
     source = source or DEFAULT_SOURCE_BY_BAR_SIZE.get(bar_size, "polygon")
     df = df.copy()
     df["source"] = source
     with get_connection() as conn:
-        conn.execute(
-            "DELETE FROM prices WHERE symbol = ? AND bar_size = ? AND source = ?",
-            (symbol, bar_size, source),
-        )
+        if replace_from:
+            delete_from = replace_from
+            if bar_size != "1d" and len(delete_from) == 10:
+                delete_from = f"{delete_from} 00:00:00"
+            conn.execute(
+                """
+                DELETE FROM prices
+                WHERE symbol = ? AND bar_size = ? AND source = ? AND date >= ?
+                """,
+                (symbol, bar_size, source, delete_from),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM prices WHERE symbol = ? AND bar_size = ? AND source = ?",
+                (symbol, bar_size, source),
+            )
         df.to_sql("prices", conn, if_exists="append", index=False,
                   method="multi", chunksize=500)
         _update_dataset_metadata(conn, symbol, bar_size, source)
@@ -291,6 +309,31 @@ def get_date_range(symbol: str, bar_size: str, source: Optional[str] = None) -> 
             (symbol, bar_size, source),
         ).fetchone()
     return (row[0], row[1]) if row and row[0] else (None, None)
+
+
+def get_dataset_details(symbol: str, bar_size: str, source: Optional[str] = None) -> Optional[dict]:
+    """Return dataset metadata for the given symbol + bar_size + source, or None."""
+    source = source or DEFAULT_SOURCE_BY_BAR_SIZE.get(bar_size, "polygon")
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT symbol, bar_size, source, bar_count, min_date, max_date, last_updated
+            FROM datasets
+            WHERE symbol = ? AND bar_size = ? AND source = ?
+            """,
+            (symbol, bar_size, source),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "symbol": row[0],
+        "bar_size": row[1],
+        "source": row[2],
+        "bar_count": row[3],
+        "min_date": row[4],
+        "max_date": row[5],
+        "last_updated": row[6],
+    }
 
 
 def list_bar_sizes(symbol: str, source: Optional[str] = None) -> list:

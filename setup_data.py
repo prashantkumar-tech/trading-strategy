@@ -7,15 +7,17 @@ Requires a .env file (or environment variables) with:
 
 Usage
 -----
-    python3 setup_data.py                  # fetch everything
+    python3 setup_data.py                  # incrementally refresh everything
     python3 setup_data.py --dry-run        # show what would be fetched
     python3 setup_data.py --symbol TQQQ    # fetch one symbol only
+    python3 setup_data.py --full-refresh   # refetch and replace every dataset
 """
 
 import argparse
 import sys
 import time
 from datetime import date
+from typing import List, Optional, Tuple
 
 # ── Dataset manifest ─────────────────────────────────────────────────────────
 # Each entry: (symbol, bar_size, source, start_date)
@@ -49,6 +51,25 @@ DATASETS = [
 ]
 
 
+def _merge_with_existing_datasets(
+    manifest: List[Tuple[str, str, str, Optional[str]]]
+) -> List[Tuple[str, str, str, Optional[str]]]:
+    """Include datasets already tracked in SQLite so refreshes cover local inventory too."""
+    try:
+        from data.database import init_db, load_dataset_inventory
+        init_db()
+        inv = load_dataset_inventory()
+    except Exception:
+        return manifest
+
+    merged = {(sym, bar, src): start for sym, bar, src, start in manifest}
+    for row in inv.itertuples(index=False):
+        key = (row.symbol, row.bar_size, row.source)
+        merged.setdefault(key, row.from_date)
+
+    return [(sym, bar, src, start) for (sym, bar, src), start in sorted(merged.items())]
+
+
 def check_env() -> bool:
     """Verify required API keys are present."""
     import os
@@ -72,21 +93,22 @@ def check_env() -> bool:
     return True
 
 
-def run(dry_run: bool = False, only_symbol: str = None) -> None:
+def run(dry_run: bool = False, only_symbol: str = None, full_refresh: bool = False) -> None:
     today = date.today().isoformat()
 
-    datasets = DATASETS
+    datasets = _merge_with_existing_datasets(DATASETS)
     if only_symbol:
-        datasets = [d for d in DATASETS if d[0].upper() == only_symbol.upper()]
+        datasets = [d for d in datasets if d[0].upper() == only_symbol.upper()]
         if not datasets:
             print(f"Symbol '{only_symbol}' not in manifest. Available:")
-            syms = sorted({d[0] for d in DATASETS})
+            syms = sorted({d[0] for d in _merge_with_existing_datasets(DATASETS)})
             for s in syms:
                 print(f"  {s}")
             sys.exit(1)
 
+    mode_label = "full refresh" if full_refresh else "incremental refresh"
     print(f"\n{'='*60}")
-    print(f"  Data Setup  —  {len(datasets)} dataset(s)  —  today: {today}")
+    print(f"  Data Setup  —  {len(datasets)} dataset(s)  —  today: {today}  —  {mode_label}")
     print(f"{'='*60}\n")
 
     if dry_run:
@@ -111,7 +133,14 @@ def run(dry_run: bool = False, only_symbol: str = None) -> None:
         print(f"{label} ...", flush=True)
         t0 = time.time()
         try:
-            df = fetch_and_store(sym, bar_size=bar, source=src, start=start, end=today)
+            df = fetch_and_store(
+                sym,
+                bar_size=bar,
+                source=src,
+                start=start,
+                end=today,
+                refresh_mode="full" if full_refresh else "incremental",
+            )
             elapsed = time.time() - t0
             print(f"  ✓  {len(df):>7,} bars  ({elapsed:.1f}s)\n")
             success.append((sym, bar, src))
@@ -141,6 +170,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bootstrap market data on a fresh machine")
     parser.add_argument("--dry-run",  action="store_true", help="Show what would be fetched")
     parser.add_argument("--symbol",   default=None,        help="Fetch one symbol only")
+    parser.add_argument("--full-refresh", action="store_true", help="Refetch and replace each dataset from its configured start date")
     args = parser.parse_args()
 
-    run(dry_run=args.dry_run, only_symbol=args.symbol)
+    run(dry_run=args.dry_run, only_symbol=args.symbol, full_refresh=args.full_refresh)
