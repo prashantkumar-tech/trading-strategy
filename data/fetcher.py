@@ -17,11 +17,13 @@ from data.indicators import add_moving_averages
 from data.sources import yfinance as _yf_source
 from data.sources import polygon  as _poly_source
 from data.sources import twelve_data as _twelve_source
+from data.sources import databento as _db_source
 
 SOURCES = {
     "yfinance": _yf_source,
     "polygon":  _poly_source,
     "twelve_data": _twelve_source,
+    "databento": _db_source,
 }
 
 # Default source per bar size

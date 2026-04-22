@@ -52,7 +52,7 @@ def render_sidebar():
             help="Choose the active timeframe for reads and fetches.",
         )
 
-        source_options = ["yfinance", "polygon", "twelve_data"] if bar_size == "1d" else ["polygon", "twelve_data"]
+        source_options = ["yfinance", "polygon", "twelve_data"] if bar_size == "1d" else ["polygon", "twelve_data", "databento"]
         default_source = st.session_state.source if st.session_state.source in source_options else source_options[0]
         source = st.selectbox(
             "Active source",
@@ -72,9 +72,15 @@ def render_sidebar():
                 "yfinance",
                 "polygon",
                 "twelve_data",
+                "databento",
             ],
         )
-        allowed_bar_sizes = ["1d"] if fetch_source == "yfinance" else ["1d", "5m", "15m", "1h"]
+        if fetch_source == "yfinance":
+            allowed_bar_sizes = ["1d"]
+        elif fetch_source == "databento":
+            allowed_bar_sizes = ["1m", "5m", "15m", "1h"]
+        else:
+            allowed_bar_sizes = ["1d", "5m", "15m", "1h"]
         if bar_size not in allowed_bar_sizes:
             st.caption(f"`{fetch_source}` does not support the current `{bar_size}` selection.")
 
