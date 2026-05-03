@@ -16,7 +16,7 @@ def init_state():
         "symbol":          "SPY",
         "bar_size":        "1d",
         "source":          "yfinance",
-        "initial_capital": 10_000,
+        "initial_capital": 30_000,
         "default_pos_pct": 10,
         "start_date":      pd.Timestamp("2010-01-01").date(),
         "end_date":        pd.Timestamp.today().date(),

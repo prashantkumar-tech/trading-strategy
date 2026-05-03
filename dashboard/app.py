@@ -33,7 +33,7 @@ st.divider()
 # ── Navigation guide ──────────────────────────────────────────────────────────
 st.subheader("Pages")
 
-c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = st.columns(10)
 c1.info("**📊 Market Data**\nPrice charts, MA overlays, and raw bar browser for any symbol and bar size.")
 c2.info("**📋 Strategy Builder**\nDefine entry and exit rules with a UI. Rules are saved per symbol.")
 c3.info("**🔬 Backtest**\nRun your strategy against historical data. See equity curve, signals, and trade history.")
@@ -41,3 +41,6 @@ c4.info("**🎯 Optimizer**\nSweep parameter combinations across multiple symbol
 c5.info("**📈 TQQQ Intraday Pyramid**\nRun the dedicated 5-minute breakout pyramid study with tier hit rates, exits, and campaign details.")
 c6.info("**📈 MES Breakout**\nRun the dedicated MES prior-day-high breakout study on Databento historical futures data.")
 c7.info("**📈 MES Intraday Pyramid**\nRun the MES same-day add-on contract study and adjust year, triggers, stops, and contract tiers.")
+c8.info("**📈 MES Scheduled Ladder**\nRun the scheduled 30-minute MES campaign study with 2-lot entries, a first target, and a runner.")
+c9.info("**📈 MES Trend Slot Ladder**\nRun the separate scheduled-trend MES study with overlapping campaigns, skipped lower-price slots, and a trailing runner.")
+c10.info("**📈 Rajat Pyramiding**\nRun the SPY 5-minute pyramiding study with yearly results, trade detail, and parameter sweeps.")
