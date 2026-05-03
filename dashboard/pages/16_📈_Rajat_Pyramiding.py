@@ -17,7 +17,7 @@ BAR_SIZE = "5m"
 SOURCE = "polygon"
 
 EXIT_COLORS = {
-    "Trailing stop":       "#ef4444",  # red   — time-ratcheted stop hit
+    "Trailing stop":       "#ef4444",  # red   — stop hit intraday
     "End of day":          "#a78bfa",  # purple — forced EOD close
     "End of day fallback": "#a78bfa",
 }
@@ -67,6 +67,69 @@ def _plot_equity(result: dict) -> None:
         yaxis_title="Portfolio Value ($)",
     )
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _build_entry_exit_table(
+    entries: list[dict],
+    trades: list[dict],
+    skipped: list[dict],
+    trail_pct: float,
+    day: str,
+) -> pd.DataFrame:
+    """Build a per-entry summary table with stop, exit time, exit price, P&L, and rule."""
+    rows = []
+
+    # Group trades by entry_id to get exit info
+    trades_df = pd.DataFrame(trades) if trades else pd.DataFrame()
+    exit_lookup: dict = {}
+    if not trades_df.empty:
+        trades_df["entry_date"] = pd.to_datetime(trades_df["entry_date"])
+        trades_df["exit_date"] = pd.to_datetime(trades_df["exit_date"])
+        for eid, grp in trades_df.groupby("entry_id"):
+            exit_lookup[int(eid)] = {
+                "exit_time": grp["exit_date"].iloc[0],
+                "exit_price": float(grp["exit_price"].iloc[0]),
+                "pnl": float(grp["pnl"].sum()),
+                "exit_rule": grp["exit_rule"].iloc[0],
+            }
+
+    for e in entries:
+        entry_dt = pd.to_datetime(e["date"])
+        if entry_dt.strftime("%Y-%m-%d") != day:
+            continue
+        stop = float(e["price"]) * (1 - trail_pct / 100)
+        ex = exit_lookup.get(int(e["entry_id"]), {})
+        rows.append({
+            "entry_time": entry_dt.strftime("%H:%M"),
+            "entry_price": round(float(e["price"]), 4),
+            "shares": int(e["shares"]),
+            "stop": round(stop, 4),
+            "exit_time": ex["exit_time"].strftime("%H:%M") if ex else "—",
+            "exit_price": round(ex["exit_price"], 4) if ex else None,
+            "pnl": round(ex["pnl"], 2) if ex else None,
+            "exit_rule": ex.get("exit_rule", "—"),
+        })
+
+    for s in skipped:
+        skip_dt = pd.to_datetime(s["date"])
+        if skip_dt.strftime("%Y-%m-%d") != day:
+            continue
+        rows.append({
+            "entry_time": skip_dt.strftime("%H:%M"),
+            "entry_price": round(float(s["price"]), 4),
+            "shares": 0,
+            "stop": None,
+            "exit_time": "—",
+            "exit_price": None,
+            "pnl": None,
+            "exit_rule": f"Skipped ({s.get('reason', '')})",
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows).sort_values("entry_time").reset_index(drop=True)
+    return df
 
 
 def _build_daily_summary(
@@ -192,7 +255,6 @@ def _plot_day_detail(
                 text=day_skipped["reason"],
             ))
 
-    # Legend annotations for exit colours
     fig.update_layout(
         height=500,
         template="plotly_dark",
@@ -203,7 +265,6 @@ def _plot_day_detail(
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # Colour legend
     legend_cols = st.columns(len(EXIT_COLORS))
     for i, (label, color) in enumerate(EXIT_COLORS.items()):
         legend_cols[i].markdown(
@@ -263,33 +324,29 @@ def _run_parameter_sweep(
     df: pd.DataFrame,
     initial_capital: float,
     trail_values: list[float],
-    ratchet_values: list[float],
     entry_price_col: str,
 ) -> pd.DataFrame:
     rows = []
     for trail_pct in trail_values:
-        for ratchet_pct in ratchet_values:
-            params = {
-                **DEFAULT_PARAMS,
-                "trail_pct": trail_pct,
-                "hourly_ratchet_pct": ratchet_pct,
-                "entry_price_col": entry_price_col,
-            }
-            result = run_backtest(df, params=params, initial_capital=initial_capital)
-            metrics = result["metrics"]
-            summary = result["summary"]
-            rows.append({
-                "trail_%": trail_pct,
-                "ratchet_%/hr": ratchet_pct,
-                "final_value": round(float(result["final_value"]), 2),
-                "return_%": float(metrics["total_return_pct"]),
-                "max_drawdown_%": float(metrics["max_drawdown_pct"]),
-                "sharpe": float(metrics["sharpe_ratio"]),
-                "trades": int(metrics["num_trades"]),
-                "win_rate_%": float(metrics["win_rate_pct"]),
-                "entries": int(summary.get("entries", 0)),
-                "skipped_entries": int(summary.get("skipped_entries", 0)),
-            })
+        params = {
+            **DEFAULT_PARAMS,
+            "trail_pct": trail_pct,
+            "entry_price_col": entry_price_col,
+        }
+        result = run_backtest(df, params=params, initial_capital=initial_capital)
+        metrics = result["metrics"]
+        summary = result["summary"]
+        rows.append({
+            "trail_%": trail_pct,
+            "final_value": round(float(result["final_value"]), 2),
+            "return_%": float(metrics["total_return_pct"]),
+            "max_drawdown_%": float(metrics["max_drawdown_pct"]),
+            "sharpe": float(metrics["sharpe_ratio"]),
+            "trades": int(metrics["num_trades"]),
+            "win_rate_%": float(metrics["win_rate_pct"]),
+            "entries": int(summary.get("entries", 0)),
+            "skipped_entries": int(summary.get("skipped_entries", 0)),
+        })
     return pd.DataFrame(rows).sort_values(["return_%", "sharpe"], ascending=False).reset_index(drop=True)
 
 
@@ -339,8 +396,7 @@ st.caption(
     "SPY 5-minute intraday backtest. "
     "Entries start at 09:35 ET, repeat every hour, last slot 15:25 ET. "
     "Lot ladder: 4 → 3 → 2 → 1 → 1 shares per entry. "
-    "Stop logic: initial stop ratchets up 0.25%% of entry price every 1 hour. "
-    "All positions close at 15:55 ET."
+    "Stop is fixed at entry − trail% for the entire day; all survivors close at 15:55 ET."
 )
 
 data_start_str, data_end_str = get_date_range(SYMBOL, BAR_SIZE, SOURCE)
@@ -353,7 +409,7 @@ available_end = pd.Timestamp(data_end_str).date()
 selectable_start = max(available_start, pd.Timestamp("2025-01-01").date())
 default_start = selectable_start
 
-WINDOW_STATE_VERSION = "hourly_lot_ladder_time_ratchet_v2"
+WINDOW_STATE_VERSION = "static_stop_eod_close_v3"
 PRESET_DAYS = {
     "1 Month": 31,
     "3 Months": 92,
@@ -415,22 +471,15 @@ with st.sidebar:
     st.divider()
     st.header("Stop Logic")
     trail_pct = st.number_input(
-        "Initial Trail Stop (%)",
+        "Trail Stop (%)",
         min_value=0.05, max_value=5.0,
         value=float(DEFAULT_PARAMS["trail_pct"]),
         step=0.05,
-        help="Stop placed this % below entry price at the moment of entry.",
-    )
-    hourly_ratchet_pct = st.number_input(
-        "Hourly Ratchet (%)",
-        min_value=0.05, max_value=5.0,
-        value=float(DEFAULT_PARAMS["hourly_ratchet_pct"]),
-        step=0.05,
-        help="Every full hour after entry, the stop rises by this % of the entry price. Stop only moves up.",
+        help="Stop placed this % below entry price. Fixed for the entire day — never moves.",
     )
     st.caption(
-        "Stop = entry − trail% at entry, then +ratchet% of entry price every hour. "
-        "Stop only moves up, never down."
+        "Stop = entry − trail% at entry. Fixed all day. "
+        "Exits: stop hit intraday, or forced close at 15:55."
     )
 
 
@@ -483,10 +532,9 @@ st.success(f"Loaded **{len(df):,}** bars from **{df['date'].min()}** to **{df['d
 params = {
     **DEFAULT_PARAMS,
     "trail_pct": trail_pct,
-    "hourly_ratchet_pct": hourly_ratchet_pct,
     "entry_price_col": entry_price_col,
 }
-window_key = f"{start_date}_{end_date}_{initial_capital}_{entry_price_col}_{trail_pct}_{hourly_ratchet_pct}"
+window_key = f"{start_date}_{end_date}_{initial_capital}_{entry_price_col}_{trail_pct}"
 
 # ── Single Backtest ───────────────────────────────────────────────────────────
 
@@ -577,14 +625,37 @@ if result:
             + (f" ({skip_reasons})" if isinstance(skip_reasons, str) and skip_reasons else "") + "."
         )
 
-        dc1, dc2 = st.columns(2)
-        with dc1:
-            st.markdown("**Selected-Day Entries**")
-            day_entries = entries_df[entries_df["day"] == selected_day] if not entries_df.empty else pd.DataFrame()
-            st.dataframe(day_entries, use_container_width=True, hide_index=True)
-        with dc2:
-            st.markdown("**Selected-Day Skipped Buys**")
-            day_skipped = skipped_df[skipped_df["day"] == selected_day] if not skipped_df.empty else pd.DataFrame()
+        # ── Entry / Stop / Exit table ──────────────────────────────────────────
+        st.markdown("**Entry & Stop → Exit Detail**")
+        entry_exit_df = _build_entry_exit_table(
+            result["entries"],
+            result["trades"],
+            result.get("skipped_entry_events", []),
+            trail_pct,
+            selected_day,
+        )
+        if not entry_exit_df.empty:
+            st.dataframe(
+                entry_exit_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "entry_time":  st.column_config.TextColumn("Entry Time"),
+                    "entry_price": st.column_config.NumberColumn("Entry $", format="$%.4f"),
+                    "shares":      st.column_config.NumberColumn("Shares"),
+                    "stop":        st.column_config.NumberColumn("Stop $", format="$%.4f"),
+                    "exit_time":   st.column_config.TextColumn("Exit Time"),
+                    "exit_price":  st.column_config.NumberColumn("Exit $", format="$%.4f"),
+                    "pnl":         st.column_config.NumberColumn("P&L $", format="$%.2f"),
+                    "exit_rule":   st.column_config.TextColumn("Exit Rule"),
+                },
+            )
+
+        st.markdown("**Selected-Day Skipped Buys**")
+        day_skipped = skipped_df[skipped_df["day"] == selected_day] if not skipped_df.empty else pd.DataFrame()
+        if day_skipped.empty:
+            st.caption("No skipped entries.")
+        else:
             st.dataframe(day_skipped, use_container_width=True, hide_index=True)
 
         st.markdown("**Daily Summary**")
@@ -649,62 +720,57 @@ st.divider()
 # ── Parameter Sweep ───────────────────────────────────────────────────────────
 
 st.subheader("Parameter Sweep")
-st.caption("Runs independent backtests across initial trail stop and profit lock trigger values.")
+st.caption("Runs independent backtests across trail stop values. Stop is fixed all day; positions close at 15:55.")
 
-sw1, sw2 = st.columns(2)
-with sw1:
-    trail_values = st.multiselect(
-        "Initial Trail Stop Values (%)",
-        options=[0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50],
-        default=[0.20, 0.25, 0.30],
-    )
-with sw2:
-    ratchet_values = st.multiselect(
-        "Hourly Ratchet Values (%/hr)",
-        options=[0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50],
-        default=[0.25],
-    )
+trail_values = st.multiselect(
+    "Trail Stop Values (%)",
+    options=[0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.75, 1.00],
+    default=[0.20, 0.30, 0.40, 0.50],
+)
 
-combo_count = len(trail_values) * len(ratchet_values)
-sweep_key = f"rajat_sweep_{window_key}_{tuple(trail_values)}_{tuple(ratchet_values)}"
+combo_count = len(trail_values)
+sweep_key = f"rajat_sweep_{window_key}_{tuple(trail_values)}"
 st.caption(f"{combo_count} combinations selected.")
 
 if st.button("▶ Run Parameter Sweep", type="primary", key="rajat_run_sweep"):
     if combo_count == 0:
-        st.error("Choose at least one value in each sweep control.")
-    elif combo_count > 100:
-        st.error("Please keep the sweep to 100 combinations or fewer.")
+        st.error("Choose at least one trail stop value.")
     else:
         with st.spinner(f"Running {combo_count} parameter combinations..."):
             st.session_state[sweep_key] = _run_parameter_sweep(
                 df,
                 initial_capital=initial_capital,
                 trail_values=trail_values,
-                ratchet_values=ratchet_values,
                 entry_price_col=entry_price_col,
             )
 
 sweep = st.session_state.get(sweep_key)
 if sweep is not None:
-    st.dataframe(sweep, use_container_width=True, hide_index=True)
+    st.dataframe(
+        sweep,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "trail_%":       st.column_config.NumberColumn("Trail %", format="%.2f%%"),
+            "final_value":   st.column_config.NumberColumn("Final Value", format="$%.2f"),
+            "return_%":      st.column_config.NumberColumn("Return %", format="%.2f%%"),
+            "max_drawdown_%":st.column_config.NumberColumn("Max DD %", format="%.2f%%"),
+            "win_rate_%":    st.column_config.NumberColumn("Win Rate %", format="%.2f%%"),
+        },
+    )
 
-    fig = go.Figure()
-    for tval in sweep["trail_%"].unique():
-        sub = sweep[sweep["trail_%"] == tval]
-        fig.add_trace(go.Scatter(
-            x=sub["max_drawdown_%"],
-            y=sub["return_%"],
-            mode="markers+text",
-            text=sub["ratchet_%/hr"].map(lambda v: f"ratchet {v}%"),
-            textposition="top center",
-            marker=dict(size=10),
-            name=f"trail {tval}%",
-        ))
+    fig = go.Figure(go.Bar(
+        x=sweep["trail_%"].map(lambda v: f"{v}%"),
+        y=sweep["return_%"],
+        marker_color="#38bdf8",
+        text=sweep["return_%"].map(lambda v: f"{v:+.2f}%"),
+        textposition="outside",
+    ))
     fig.update_layout(
-        height=360,
+        height=320,
         template="plotly_dark",
         margin=dict(t=20, b=20),
-        xaxis_title="Max Drawdown (%)",
+        xaxis_title="Trail Stop (%)",
         yaxis_title="Total Return (%)",
     )
     st.plotly_chart(fig, use_container_width=True)

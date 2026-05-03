@@ -16,8 +16,7 @@ LAST_ENTRY_MINUTE = 15 * 60 + 25
 FINAL_EXIT_MINUTE = 15 * 60 + 55
 
 DEFAULT_PARAMS = {
-    "trail_pct": 0.25,          # initial stop: this % below entry price
-    "hourly_ratchet_pct": 0.25, # stop moves up by this % of entry price each hour
+    "trail_pct": 0.80,          # stop placed this % below entry price; fixed for the whole day
     "entry_price_col": "close",
     "initial_capital": 10_000.0,
 }
@@ -67,6 +66,17 @@ def _prepare_data(df: pd.DataFrame) -> pd.DataFrame:
     data = data[
         data["bar_minutes"].between(REGULAR_OPEN_MINUTE, FINAL_EXIT_MINUTE)
     ].copy()
+
+    # Attach previous trading day's low to every bar.
+    daily_low = (
+        data.groupby("session_date")["low"]
+        .min()
+        .reset_index()
+        .rename(columns={"low": "day_low"})
+    )
+    daily_low["prev_day_low"] = daily_low["day_low"].shift(1)
+    data = data.merge(daily_low[["session_date", "prev_day_low"]], on="session_date", how="left")
+
     return data.reset_index(drop=True)
 
 
@@ -126,7 +136,6 @@ def run_backtest(
         }
 
     trail_pct = float(params["trail_pct"]) / 100
-    hourly_ratchet_pct = float(params["hourly_ratchet_pct"]) / 100
     entry_price_col = str(params["entry_price_col"])
     entry_minutes = _scheduled_entry_minutes()
 
@@ -183,6 +192,8 @@ def run_backtest(
             previous_close = close_price
             continue
 
+        # Stop is fixed at entry_price * (1 - trail_pct) for the entire day.
+        # Check each bar's low; exit at the stop level if hit.
         remaining: list[ChildPosition] = []
         for position in active:
             if float(row["low"]) <= float(position.stop_trigger):
@@ -190,12 +201,6 @@ def run_backtest(
                     position, ts, float(position.stop_trigger), "Trailing stop", trades
                 )
             else:
-                hours_elapsed = int((ts - position.entry_time).total_seconds() // 3600)
-                ratcheted_stop = (
-                    position.entry_price * (1 - trail_pct)
-                    + hours_elapsed * position.entry_price * hourly_ratchet_pct
-                )
-                position.stop_trigger = max(float(position.stop_trigger), ratcheted_stop)
                 remaining.append(position)
         active = remaining
 
@@ -203,9 +208,11 @@ def run_backtest(
             entry_price = float(row[entry_price_col])
             is_first_entry = previous_entry_price is None
             can_add = is_first_entry or entry_price >= float(previous_entry_price)
+            prev_day_low = row["prev_day_low"]
+            above_prev_day_low = pd.isna(prev_day_low) or entry_price >= float(prev_day_low)
             lot_size = _shares_for_day_entry(day_entry_count + 1)
             required_cash = lot_size * entry_price
-            if can_add:
+            if can_add and above_prev_day_low:
                 day_entry_count += 1
                 entry_id += 1
                 if first_entry_price is None:
@@ -229,17 +236,23 @@ def run_backtest(
                     "shares": lot_size,
                     "first_entry_price": round(float(first_entry_price), 4),
                     "previous_entry_price": round(float(previous_entry_price), 4),
+                    "prev_day_low": round(float(prev_day_low), 4) if not pd.isna(prev_day_low) else None,
                 })
             else:
+                if not can_add:
+                    reason = "Below previous entry price"
+                else:
+                    reason = "Below previous day's low"
                 skipped_entries += 1
                 skipped_entry_events.append({
                     "date": str(ts),
                     "price": round(entry_price, 4),
                     "first_entry_price": round(float(first_entry_price), 4) if first_entry_price is not None else None,
                     "previous_entry_price": round(float(previous_entry_price), 4) if previous_entry_price is not None else None,
+                    "prev_day_low": round(float(prev_day_low), 4) if not pd.isna(prev_day_low) else None,
                     "required_cash": round(required_cash, 2),
                     "available_cash": round(cash, 2),
-                    "reason": "Below previous entry price",
+                    "reason": reason,
                 })
 
         portfolio_value = cash + sum(position.shares * close_price for position in active)

@@ -49,9 +49,11 @@ At each scheduled entry time:
    - Default: `close`
    - Alternative supported by UI: `open`
 2. The first valid entry of the day establishes the day's reference price.
-3. Each subsequent scheduled entry is allowed only when the current entry price is greater than or equal to the *previous* entry price of that day.
-4. If current price is below the previous entry price, skip the scheduled entry (`Below previous entry price`).
+3. **No entry is allowed if the current entry price is below the previous trading day's low.** Skip with reason `Below previous day's low`. On the first trading day in the dataset (no prior day available), this filter is not applied.
+4. Each subsequent scheduled entry is allowed only when the current entry price is greater than or equal to the *previous* entry price of that day. Skip with reason `Below previous entry price`.
 5. If cash is insufficient for the lot-size entry, skip the scheduled entry (`Insufficient cash`).
+
+Checks are applied in order: previous day's low filter first, then previous entry price filter.
 
 ## Per-Entry Position Structure
 
@@ -59,45 +61,29 @@ Each scheduled entry creates N individual 1-share child positions (N determined 
 
 ## Trailing Stop Exit
 
-Each share position carries a trailing stop that ratchets upward on a fixed hourly schedule.
+Each share position carries a fixed stop set at entry. The stop **never moves** during the day.
 
-Initial stop trigger at entry:
+Stop trigger at entry:
 
 ```text
 stop_trigger = entry_price * (1 - trail_pct / 100)
 ```
 
-Hourly ratchet update (evaluated on every 5-minute bar):
+The stop remains at this level for the entire session. There is no ratchet, no high-water mark, and no intraday adjustment.
 
-```text
-hours_elapsed = floor((current_bar_time - entry_time).total_seconds / 3600)
-ratcheted_stop = entry_price * (1 - trail_pct / 100) + hours_elapsed * entry_price * (hourly_ratchet_pct / 100)
-stop_trigger = max(existing_stop_trigger, ratcheted_stop)
-```
+Default parameter:
 
-The stop trigger only moves up, never down. There is no price-based trailing (no high-water mark tracking).
+- `trail_pct = 0.25` — stop placed 0.25% below entry price
 
-Default parameters:
-
-- `trail_pct = 0.25` — initial stop 0.25% below entry
-- `hourly_ratchet_pct = 0.25` — stop rises by 0.25% of entry price each hour
-
-Example stop schedule for a position entered at $500.00:
-
-| Hours held | Stop trigger |
-|------------|-------------|
-| 0 | $498.75 (entry − 0.25%) |
-| 1 | $500.00 (breakeven) |
-| 2 | $501.25 (entry + 0.25%) |
-| 3 | $502.50 (entry + 0.50%) |
-
-When a 5-minute bar's `low` is less than or equal to the active stop trigger, the position exits at:
+When a 5-minute bar's `low` is less than or equal to the stop trigger, the position exits at:
 
 ```text
 exit_price = stop_trigger
 ```
 
 Exit rule label: `Trailing stop`
+
+Positions that survive to 15:55 are closed at that bar's close (exit rule: `End of day`).
 
 ## End-of-Day Exit
 
@@ -126,8 +112,9 @@ This avoids assuming that a bar's high first raises the trailing stop and that t
 
 Skipped scheduled entries are recorded with a reason:
 
-- `Below first entry price`
-- `Insufficient cash`
+- `Below previous day's low` — entry price is below the prior trading day's session low
+- `Below previous entry price` — entry price is below the most recent entry of the same day
+- `Insufficient cash` — not enough cash to fill the lot-size order
 
 The UI shows these skipped entries in the selected-day drilldown.
 
@@ -138,7 +125,7 @@ The Streamlit page supports:
 - Starting capital control
 - Entry price selector: `close` or `open`
 - Initial trail stop percentage
-- Hourly ratchet percentage
+- Trail stop percentage
 - Custom study window
 - Preset study windows
 - Single backtest
@@ -153,7 +140,7 @@ The Streamlit page supports:
 - Skipped scheduled-buy markers
 - Entry detail table
 - Trade detail table
-- Parameter sweep across initial trail stop and hourly ratchet values
+- Parameter sweep across trail stop values
 
 Current UI date restriction:
 
@@ -168,8 +155,7 @@ bar_size               = 5m
 source                 = polygon
 initial_capital        = 10000
 entry_price_col        = close
-trail_pct              = 0.25
-hourly_ratchet_pct     = 0.25
+trail_pct              = 0.40
 first_entry_time       = 09:35
 entry_interval         = 60 minutes
 last_entry_time        = 15:25
