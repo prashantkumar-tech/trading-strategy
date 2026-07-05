@@ -58,3 +58,20 @@ def select_basket(momentum: pd.Series, eligible: set, current_holdings: list,
         if s not in basket:
             basket.append(s)
     return basket[:top_n], rank
+
+
+def build_price_panel(symbols: List[str], start=None, end=None,
+                      loader: Callable = load_prices):
+    """Load each symbol and pivot into aligned wide close/ma200 panels."""
+    closes, ma200s = {}, {}
+    for sym in symbols:
+        df = loader(sym, start=start, end=end)
+        if df is None or df.empty:
+            continue
+        df = df.set_index("date")
+        closes[sym] = df["close"]
+        ma200s[sym] = df["ma200"]
+
+    close = pd.DataFrame(closes).sort_index()
+    ma200 = pd.DataFrame(ma200s).reindex(close.index)
+    return close, ma200

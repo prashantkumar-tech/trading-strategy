@@ -1,5 +1,5 @@
 import pandas as pd
-from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket
+from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel
 
 
 def test_compute_momentum_uses_skip_and_lookback_windows():
@@ -45,3 +45,22 @@ def test_select_basket_refills_open_slots_from_top_ranks():
     eligible = set(mom.index)
     basket, _ = select_basket(mom, eligible, [], top_n=10, buffer_rank=20)
     assert basket == [f"S{i}" for i in range(1, 11)]  # top 10 by momentum
+
+
+def test_build_price_panel_pivots_symbols_into_columns():
+    dates = pd.date_range("2020-01-01", periods=3, freq="D")
+
+    def fake_loader(symbol, start=None, end=None):
+        base = {"A": 10.0, "B": 20.0}[symbol]
+        return pd.DataFrame({
+            "date": dates,
+            "close": [base, base + 1, base + 2],
+            "ma200": [base - 1, base - 1, base - 1],
+        })
+
+    close, ma200 = build_price_panel(["A", "B"], loader=fake_loader)
+    assert list(close.columns) == ["A", "B"]
+    assert close.loc[dates[2], "A"] == 12.0
+    assert close.loc[dates[0], "B"] == 20.0
+    assert ma200.loc[dates[0], "A"] == 9.0
+    assert close.index.equals(ma200.index)
