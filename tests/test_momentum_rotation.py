@@ -1,5 +1,6 @@
+import numpy as np
 import pandas as pd
-from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel
+from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel, run_momentum_rotation
 
 
 def test_compute_momentum_uses_skip_and_lookback_windows():
@@ -64,3 +65,52 @@ def test_build_price_panel_pivots_symbols_into_columns():
     assert close.loc[dates[0], "B"] == 20.0
     assert ma200.loc[dates[0], "A"] == 9.0
     assert close.index.equals(ma200.index)
+
+
+def _make_loader(price_map, dates):
+    """price_map: {symbol: list_of_closes}. ma200 set well below close (always eligible)."""
+    def loader(symbol, start=None, end=None):
+        closes = price_map[symbol]
+        return pd.DataFrame({
+            "date": dates,
+            "close": closes,
+            "ma200": [c * 0.5 for c in closes],
+        })
+    return loader
+
+
+def test_run_momentum_rotation_uptrend_grows_equity_and_holds_basket():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")  # 8 month-ends
+    # 12 symbols, all rising; steeper slope = higher momentum
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
+    loader = _make_loader(price_map, dates)
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader,
+    )
+
+    assert set(result.keys()) >= {"equity_curve", "trades", "metrics", "final_value", "holdings"}
+    assert result["final_value"] > 10_000.0            # uptrend grows equity
+    assert 0 < len(result["holdings"]) <= 10           # holds at most top_n
+    assert "sharpe_ratio" in result["metrics"]
+
+
+def test_run_momentum_rotation_logs_full_exit_when_momentum_collapses():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")
+    # 11 steady risers plus one name that spikes then crashes so it exits the basket
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 12)}
+    price_map["CRASH"] = [100, 130, 170, 210, 250, 120, 90, 60]
+    loader = _make_loader(price_map, dates)
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader,
+    )
+
+    reasons = {t["exit_reason"] for t in result["trades"]}
+    assert reasons.issubset({"fell out of top 20", "below 200MA"})
+    # every trade carries the required schema
+    for t in result["trades"]:
+        assert {"symbol", "entry_date", "exit_date", "pnl", "return_pct",
+                "exit_reason", "rank_at_exit"} <= set(t.keys())
