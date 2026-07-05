@@ -7,6 +7,7 @@ import streamlit as st
 from data.database import list_symbols, load_prices
 from data.sp500_universe import get_sp500_tickers, get_sp500_meta
 from backtest.momentum_rotation import run_momentum_rotation, momentum_leaderboard
+from backtest.metrics import yearly_performance
 
 st.set_page_config(page_title="S&P 500 Momentum Rotation", page_icon="📈", layout="wide")
 st.title("📈 S&P 500 Momentum Rotation")
@@ -87,17 +88,57 @@ if st.button("Run backtest", type="primary"):
     c3.metric("Sharpe", m["sharpe_ratio"])
     c4.metric("Max drawdown", f"{m['max_drawdown_pct']}%")
 
+    # SPY buy & hold, normalized to the same starting capital (reused below).
+    eq = result["equity_curve"]
+    spy = load_prices("SPY", start=start or None, end=end or None, bar_size="1d", source="yfinance")
+    spy_bh = None
+    if not spy.empty:
+        spy_close = spy.set_index("date")["close"]
+        spy_bh = spy_close / spy_close.iloc[0] * float(initial_capital)
+
     # Equity curve vs SPY buy & hold
     fig = go.Figure()
-    eq = result["equity_curve"]
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, name="Strategy"))
-    spy = load_prices("SPY", start=start or None, end=end or None, bar_size="1d", source="yfinance")
-    if not spy.empty:
-        spy = spy.set_index("date")["close"]
-        spy_bh = spy / spy.iloc[0] * float(initial_capital)
+    if spy_bh is not None:
         fig.add_trace(go.Scatter(x=spy_bh.index, y=spy_bh.values, name="SPY buy & hold"))
     fig.update_layout(title="Equity curve", xaxis_title="Date", yaxis_title="Portfolio value ($)")
     st.plotly_chart(fig, use_container_width=True)
+
+    # ── Yearly performance vs S&P 500 ──────────────────────────────────────
+    st.subheader("Yearly performance vs S&P 500")
+    strat_yp = yearly_performance(eq).rename(
+        columns={"return_pct": "strategy_pct", "pnl": "strategy_pnl"})
+    comp = strat_yp[["year", "strategy_pct", "strategy_pnl"]].copy()
+    if spy_bh is not None:
+        spy_yp = yearly_performance(spy_bh).rename(
+            columns={"return_pct": "spy_pct", "pnl": "spy_pnl"})
+        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_pnl"]], on="year", how="left")
+        comp["outperformance_pp"] = (comp["strategy_pct"] - comp["spy_pct"]).round(2)
+
+    if comp.empty:
+        st.info("Not enough history to compute yearly performance for this window.")
+    else:
+        ybar = go.Figure()
+        ybar.add_trace(go.Bar(x=comp["year"], y=comp["strategy_pct"], name="Strategy"))
+        if "spy_pct" in comp.columns:
+            ybar.add_trace(go.Bar(x=comp["year"], y=comp["spy_pct"], name="SPY buy & hold"))
+        ybar.update_layout(barmode="group", title="Annual return by year",
+                           xaxis_title="Year", yaxis_title="Return (%)")
+        ybar.update_xaxes(type="category")
+        st.plotly_chart(ybar, use_container_width=True)
+
+        rename = {
+            "year": "Year",
+            "strategy_pct": "Strategy %",
+            "spy_pct": "SPY %",
+            "outperformance_pp": "Outperformance (pp)",
+            "strategy_pnl": "Strategy P&L ($)",
+            "spy_pnl": "SPY P&L ($)",
+        }
+        order = [c for c in ["year", "strategy_pct", "spy_pct", "outperformance_pp",
+                             "strategy_pnl", "spy_pnl"] if c in comp.columns]
+        st.dataframe(comp[order].rename(columns=rename),
+                     use_container_width=True, hide_index=True)
 
     st.subheader("Current basket")
     st.write(result["holdings"])
