@@ -1,7 +1,44 @@
 import numpy as np
 import pandas as pd
 import pytest
-from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel, run_momentum_rotation
+from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel, run_momentum_rotation, momentum_leaderboard
+
+
+def test_momentum_leaderboard_ranks_by_momentum_with_ma_flag():
+    dates = pd.date_range("2020-01-01", periods=6, freq="D")
+
+    def loader(symbol, start=None, end=None):
+        series = {
+            "A": [100, 110, 121, 133, 146, 161],   # fastest riser
+            "B": [100, 103, 106, 109, 112, 115],   # medium
+            "C": [100, 101, 102, 103, 104, 105],   # slowest
+        }[symbol]
+        ma = [s * 0.5 for s in series]
+        if symbol == "C":
+            ma = [s * 2 for s in series]           # C sits below its 200MA
+        return pd.DataFrame({"date": dates, "close": series, "ma200": ma})
+
+    lb = momentum_leaderboard(["A", "B", "C"], top_n=3, lookback_days=2, skip_days=1, loader=loader)
+
+    assert list(lb["symbol"]) == ["A", "B", "C"]       # ranked by momentum, desc
+    assert list(lb["rank"]) == [1, 2, 3]
+    assert lb.loc[lb.symbol == "A", "above_200ma"].iloc[0] == True
+    assert lb.loc[lb.symbol == "C", "above_200ma"].iloc[0] == False
+    # momentum_pct is a rounded percentage; A's latest 146/133-1 ~= 9.77%
+    assert abs(lb.loc[lb.symbol == "A", "momentum_pct"].iloc[0] - 9.77) < 0.1
+
+
+def test_momentum_leaderboard_truncates_to_top_n():
+    dates = pd.date_range("2020-01-01", periods=4, freq="D")
+
+    def loader(symbol, start=None, end=None):
+        slope = int(symbol[1:])
+        series = [100 + slope * i for i in range(4)]
+        return pd.DataFrame({"date": dates, "close": series, "ma200": [s * 0.5 for s in series]})
+
+    lb = momentum_leaderboard([f"S{i}" for i in range(1, 8)], top_n=3, lookback_days=2, skip_days=1, loader=loader)
+    assert len(lb) == 3
+    assert list(lb["symbol"]) == ["S7", "S6", "S5"]    # steepest slopes rank highest
 
 
 def test_compute_momentum_uses_skip_and_lookback_windows():

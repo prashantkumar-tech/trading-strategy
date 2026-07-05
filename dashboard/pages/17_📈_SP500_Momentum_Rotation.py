@@ -6,7 +6,7 @@ import streamlit as st
 
 from data.database import list_symbols, load_prices
 from data.sp500_universe import get_sp500_tickers
-from backtest.momentum_rotation import run_momentum_rotation
+from backtest.momentum_rotation import run_momentum_rotation, momentum_leaderboard
 
 st.set_page_config(page_title="S&P 500 Momentum Rotation", page_icon="📈", layout="wide")
 st.title("📈 S&P 500 Momentum Rotation")
@@ -30,6 +30,32 @@ except Exception as e:
                f"falling back to all daily symbols in the database (may include non-constituents).")
     symbols = sorted(set(available) - {"SPY"})
 st.caption(f"{len(symbols)} daily symbols available in the database.")
+
+# ── Momentum leaderboard ──────────────────────────────────────────────────
+st.subheader("📊 Momentum leaderboard")
+st.caption("Top names ranked by 12-1 momentum as of the latest available date. "
+           "`above_200ma` = passes the strategy's trend filter (only these are eligible to be held).")
+leaderboard_n = st.number_input("Show top N", 5, 100, 20, key="leaderboard_n")
+if st.button("Show leaderboard"):
+    if not symbols:
+        st.error("No symbols in the DB — fetch the S&P 500 universe first "
+                 "(`python3 -m data.fetch_universe`).")
+    else:
+        with st.spinner(f"Ranking {len(symbols)} symbols..."):
+            try:
+                board = momentum_leaderboard(
+                    symbols, start=start or None, end=end or None,
+                    top_n=int(leaderboard_n),
+                    lookback_days=int(lookback_days), skip_days=int(skip_days),
+                )
+            except ValueError as e:
+                st.error(str(e))
+                st.stop()
+        eligible_count = int(board["above_200ma"].sum())
+        st.caption(f"{eligible_count} of the top {len(board)} pass the 200-day MA filter.")
+        st.dataframe(board, use_container_width=True, hide_index=True)
+
+st.divider()
 
 if st.button("Run backtest", type="primary"):
     if len(symbols) < top_n:

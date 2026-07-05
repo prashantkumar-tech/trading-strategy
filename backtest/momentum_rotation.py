@@ -182,3 +182,35 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
         "final_value": round(float(equity_series.iloc[-1]), 2) if not equity_series.empty else initial_capital,
         "holdings": list(lots.keys()),
     }
+
+
+def momentum_leaderboard(symbols, start=None, end=None, top_n=20,
+                         lookback_days=252, skip_days=21,
+                         loader: Callable = load_prices) -> pd.DataFrame:
+    """Rank the universe by 12-1 momentum on the most recent available date.
+
+    Returns a DataFrame (highest momentum first, truncated to top_n) with
+    columns: rank, symbol, momentum_pct, above_200ma. Names without a defined
+    momentum on the latest date are excluded. The above_200ma flag shows whether
+    each name would pass the strategy's 200-day MA eligibility filter.
+    """
+    close, ma200 = build_price_panel(symbols, start, end, loader)
+    if close.empty:
+        raise ValueError("No price data available for the selected symbols and date range.")
+
+    momentum = compute_momentum(close, lookback_days, skip_days)
+    latest_mom = momentum.iloc[-1].dropna().sort_values(ascending=False)
+    latest_close = close.iloc[-1]
+    latest_ma = ma200.iloc[-1]
+
+    rows = []
+    for rank, (sym, mom) in enumerate(latest_mom.head(top_n).items(), start=1):
+        ma_val = latest_ma.get(sym)
+        above = bool(pd.notna(ma_val) and latest_close[sym] > ma_val)
+        rows.append({
+            "rank": rank,
+            "symbol": sym,
+            "momentum_pct": round(float(mom) * 100, 2),
+            "above_200ma": above,
+        })
+    return pd.DataFrame(rows, columns=["rank", "symbol", "momentum_pct", "above_200ma"])
