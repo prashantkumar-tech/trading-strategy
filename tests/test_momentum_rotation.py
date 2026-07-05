@@ -28,6 +28,21 @@ def test_momentum_leaderboard_ranks_by_momentum_with_ma_flag():
     assert abs(lb.loc[lb.symbol == "A", "momentum_pct"].iloc[0] - 9.77) < 0.1
 
 
+def test_momentum_leaderboard_includes_name_column_when_names_given():
+    dates = pd.date_range("2020-01-01", periods=6, freq="D")
+
+    def loader(symbol, start=None, end=None):
+        series = {"A": [100, 110, 121, 133, 146, 161], "B": [100, 103, 106, 109, 112, 115]}[symbol]
+        return pd.DataFrame({"date": dates, "close": series, "ma200": [s * 0.5 for s in series]})
+
+    names = {"A": "Apple-ish Inc.", "B": "Banana-ish Corp."}
+    lb = momentum_leaderboard(["A", "B"], top_n=2, lookback_days=2, skip_days=1, loader=loader, names=names)
+
+    assert "name" in lb.columns
+    assert list(lb.columns).index("name") == 2          # placed right after symbol
+    assert lb.loc[lb.symbol == "A", "name"].iloc[0] == "Apple-ish Inc."
+
+
 def test_momentum_leaderboard_truncates_to_top_n():
     dates = pd.date_range("2020-01-01", periods=4, freq="D")
 

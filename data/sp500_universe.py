@@ -7,12 +7,13 @@ network fetch happens at most once unless refreshed.
 
 import io
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 from urllib.request import Request, urlopen
 import pandas as pd
 
 WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 CACHE_PATH = Path(__file__).parent / "sp500_tickers.txt"
+NAMES_CACHE_PATH = Path(__file__).parent / "sp500_names.tsv"
 
 # Wikipedia 403s the default urllib user-agent, so identify as a browser.
 _USER_AGENT = (
@@ -29,6 +30,11 @@ def normalize_ticker(ticker: str) -> str:
 def parse_sp500_table(df: pd.DataFrame) -> List[str]:
     """Extract normalized tickers from a Wikipedia constituents DataFrame."""
     return [normalize_ticker(str(s)) for s in df["Symbol"].tolist()]
+
+
+def parse_sp500_names(df: pd.DataFrame) -> Dict[str, str]:
+    """Map normalized ticker -> company name from a Wikipedia constituents DataFrame."""
+    return {normalize_ticker(str(s)): str(n) for s, n in zip(df["Symbol"], df["Security"])}
 
 
 def _fetch_wiki_tables() -> List[pd.DataFrame]:
@@ -58,3 +64,28 @@ def get_sp500_tickers(use_cache: bool = True) -> List[str]:
 
     CACHE_PATH.write_text("\n".join(tickers) + "\n")
     return tickers
+
+
+def get_sp500_names(use_cache: bool = True) -> Dict[str, str]:
+    """Return a {ticker: company name} mapping from Wikipedia, cached to a TSV file.
+
+    Raises RuntimeError with a clear message if the list cannot be fetched or parsed.
+    """
+    if use_cache and NAMES_CACHE_PATH.exists():
+        names = {}
+        for line in NAMES_CACHE_PATH.read_text().splitlines():
+            if "\t" in line:
+                sym, name = line.split("\t", 1)
+                names[normalize_ticker(sym)] = name
+        return names
+
+    try:
+        tables = _fetch_wiki_tables()
+        names = parse_sp500_names(tables[0])
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not fetch the S&P 500 company names from Wikipedia ({exc})."
+        ) from exc
+
+    NAMES_CACHE_PATH.write_text("\n".join(f"{s}\t{n}" for s, n in names.items()) + "\n")
+    return names

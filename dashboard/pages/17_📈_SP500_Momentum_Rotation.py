@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data.database import list_symbols, load_prices
-from data.sp500_universe import get_sp500_tickers
+from data.sp500_universe import get_sp500_tickers, get_sp500_names
 from backtest.momentum_rotation import run_momentum_rotation, momentum_leaderboard
 
 st.set_page_config(page_title="S&P 500 Momentum Rotation", page_icon="📈", layout="wide")
@@ -43,10 +43,15 @@ if st.button("Show leaderboard"):
     else:
         with st.spinner(f"Ranking {len(symbols)} symbols..."):
             try:
+                try:
+                    names = get_sp500_names()
+                except Exception:
+                    names = None
                 board = momentum_leaderboard(
                     symbols, start=start or None, end=end or None,
                     top_n=int(leaderboard_n),
                     lookback_days=int(lookback_days), skip_days=int(skip_days),
+                    names=names,
                 )
             except ValueError as e:
                 st.error(str(e))
