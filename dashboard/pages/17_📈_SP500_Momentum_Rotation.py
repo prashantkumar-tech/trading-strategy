@@ -21,6 +21,9 @@ skip_days = st.sidebar.number_input("Skip recent (trading days)", 0, 60, 21)
 max_per_sector = st.sidebar.number_input(
     "Max holdings per sector (0 = no cap)", 0, int(top_n), 0,
     help="Limit how many of the basket may come from one GICS sector, to reduce concentration.")
+use_regime = st.sidebar.checkbox(
+    "Cash out when SPY < 200-day MA", value=False,
+    help="Market-regime filter: hold cash whenever SPY is below its 200-day moving average.")
 initial_capital = st.sidebar.number_input("Starting capital ($)", 1000, 10_000_000, 10_000, step=1000)
 start = st.sidebar.text_input("Start date (YYYY-MM-DD)", "2015-01-01")
 end = st.sidebar.text_input("End date (YYYY-MM-DD)", "")
@@ -156,6 +159,18 @@ if st.button("Run backtest", type="primary"):
                 st.warning("Could not load sector data; running without the sector cap.")
                 cap = None
 
+        # Market-regime filter: risk-on only when SPY is above its 200-day MA.
+        regime = None
+        if use_regime:
+            spy_df = load_prices("SPY", start=start or None, end=end or None,
+                                 bar_size="1d", source="yfinance")
+            if spy_df.empty:
+                st.warning("No SPY data available; running without the market-regime filter.")
+            else:
+                spy_df = spy_df.set_index("date")
+                regime = (spy_df["close"] > spy_df["ma200"]).where(
+                    spy_df["ma200"].notna(), True)
+
         with st.spinner(f"Ranking {len(symbols)} symbols..."):
             try:
                 result = run_momentum_rotation(
@@ -163,7 +178,7 @@ if st.button("Run backtest", type="primary"):
                     top_n=int(top_n), buffer_rank=int(buffer_rank),
                     lookback_days=int(lookback_days), skip_days=int(skip_days),
                     initial_capital=float(initial_capital),
-                    sectors=sectors, max_per_sector=cap,
+                    sectors=sectors, max_per_sector=cap, regime=regime,
                 )
             except ValueError as e:
                 st.session_state.pop("backtest", None)
