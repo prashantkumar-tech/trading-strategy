@@ -34,3 +34,27 @@ def month_end_dates(dates) -> List[pd.Timestamp]:
         if is_last:
             ends.append(d)
     return ends
+
+
+def select_basket(momentum: pd.Series, eligible: set, current_holdings: list,
+                  top_n: int = 10, buffer_rank: int = 20):
+    """Pick the target basket applying the top-N hold with a top-buffer_rank sell buffer.
+
+    Returns (basket, rank_map). Holdings still ranked within buffer_rank are kept;
+    open slots are refilled from the highest-ranked eligible names not already held.
+    """
+    ranked = sorted(
+        (s for s in eligible if s in momentum.index and pd.notna(momentum[s])),
+        key=lambda s: momentum[s],
+        reverse=True,
+    )
+    rank = {s: i + 1 for i, s in enumerate(ranked)}
+
+    kept = [s for s in current_holdings if rank.get(s, 10 ** 9) <= buffer_rank]
+    basket = list(kept)
+    for s in ranked:
+        if len(basket) >= top_n:
+            break
+        if s not in basket:
+            basket.append(s)
+    return basket[:top_n], rank
