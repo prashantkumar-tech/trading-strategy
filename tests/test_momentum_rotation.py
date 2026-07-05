@@ -105,6 +105,37 @@ def test_select_basket_refills_open_slots_from_top_ranks():
     assert basket == [f"S{i}" for i in range(1, 11)]  # top 10 by momentum
 
 
+def test_select_basket_enforces_sector_cap():
+    mom = pd.Series({"S1": 6, "S2": 5, "S3": 4, "S4": 3, "S5": 2, "S6": 1}, dtype=float)
+    eligible = set(mom.index)
+    sectors = {"S1": "Tech", "S2": "Tech", "S3": "Tech", "S4": "Tech",
+               "S5": "Health", "S6": "Health"}
+    basket, _ = select_basket(mom, eligible, [], top_n=4, buffer_rank=10,
+                              sectors=sectors, max_per_sector=2)
+    # top momentum is all Tech, but only 2 Tech allowed -> fill rest from Health
+    assert basket == ["S1", "S2", "S5", "S6"]
+
+
+def test_select_basket_sector_cap_drops_over_cap_kept_holding():
+    mom = pd.Series({"S1": 6, "S2": 5, "S3": 4, "S4": 3, "S5": 2, "S6": 1}, dtype=float)
+    eligible = set(mom.index)
+    sectors = {k: ("Tech" if k in {"S1", "S2", "S3"} else "Health") for k in mom.index}
+    # holding 3 Tech names; cap of 2 must evict the lowest-momentum Tech (S3)
+    basket, _ = select_basket(mom, eligible, ["S1", "S2", "S3"], top_n=4, buffer_rank=10,
+                              sectors=sectors, max_per_sector=2)
+    assert "S3" not in basket
+    assert set(basket) == {"S1", "S2", "S4", "S5"}
+
+
+def test_select_basket_no_cap_when_params_absent():
+    mom = _momentum_series(25)
+    eligible = set(mom.index)
+    # sectors given but max_per_sector None -> cap inactive, unchanged behavior
+    sectors = {s: "Tech" for s in mom.index}
+    basket, _ = select_basket(mom, eligible, [], top_n=10, buffer_rank=20, sectors=sectors)
+    assert basket == [f"S{i}" for i in range(1, 11)]
+
+
 def test_build_price_panel_pivots_symbols_into_columns():
     dates = pd.date_range("2020-01-01", periods=3, freq="D")
 
