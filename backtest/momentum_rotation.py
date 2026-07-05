@@ -37,11 +37,18 @@ def month_end_dates(dates) -> List[pd.Timestamp]:
 
 
 def select_basket(momentum: pd.Series, eligible: set, current_holdings: list,
-                  top_n: int = 10, buffer_rank: int = 20):
+                  top_n: int = 10, buffer_rank: int = 20,
+                  sectors=None, max_per_sector=None):
     """Pick the target basket applying the top-N hold with a top-buffer_rank sell buffer.
 
     Returns (basket, rank_map). Holdings still ranked within buffer_rank are kept;
     open slots are refilled from the highest-ranked eligible names not already held.
+
+    If ``sectors`` ({ticker: sector}) and ``max_per_sector`` are both given, no more
+    than ``max_per_sector`` names from any one sector are held: candidates are taken
+    in priority order (kept holdings by rank, then refills by rank) and skipped once
+    their sector is full — this can evict a lower-ranked kept holding to cut
+    concentration. Names with no known sector are never capped.
     """
     ranked = sorted(
         (s for s in eligible if s in momentum.index and pd.notna(momentum[s])),
@@ -50,14 +57,29 @@ def select_basket(momentum: pd.Series, eligible: set, current_holdings: list,
     )
     rank = {s: i + 1 for i, s in enumerate(ranked)}
 
-    kept = [s for s in current_holdings if rank.get(s, 10 ** 9) <= buffer_rank]
-    basket = list(kept)
-    for s in ranked:
+    kept = sorted(
+        (s for s in current_holdings if rank.get(s, 10 ** 9) <= buffer_rank),
+        key=lambda s: rank[s],
+    )
+    # Kept holdings claim slots first (highest momentum first), then refills by rank.
+    candidates = kept + [s for s in ranked if s not in kept]
+
+    cap_active = sectors is not None and max_per_sector is not None
+    sector_counts = {}
+    basket = []
+    for s in candidates:
         if len(basket) >= top_n:
             break
-        if s not in basket:
-            basket.append(s)
-    return basket[:top_n], rank
+        if s in basket:
+            continue
+        if cap_active:
+            sec = sectors.get(s)
+            if sec is not None and sector_counts.get(sec, 0) >= max_per_sector:
+                continue
+            if sec is not None:
+                sector_counts[sec] = sector_counts.get(sec, 0) + 1
+        basket.append(s)
+    return basket, rank
 
 
 def build_price_panel(symbols: List[str], start=None, end=None,
@@ -79,8 +101,13 @@ def build_price_panel(symbols: List[str], start=None, end=None,
 
 def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=20,
                           lookback_days=252, skip_days=21, initial_capital=10_000.0,
-                          loader: Callable = load_prices) -> dict:
-    """Simulate the monthly equal-weight momentum rotation. See module docstring."""
+                          loader: Callable = load_prices,
+                          sectors=None, max_per_sector=None) -> dict:
+    """Simulate the monthly equal-weight momentum rotation. See module docstring.
+
+    Passing ``sectors`` ({ticker: sector}) with ``max_per_sector`` caps how many
+    holdings may come from any one sector at each rebalance (see select_basket).
+    """
     close, ma200 = build_price_panel(symbols, start, end, loader)
     if close.empty:
         raise ValueError("No price data available for the selected symbols and date range.")
@@ -113,7 +140,8 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
                 and pd.notna(ma_row.get(s)) and prices_row[s] > ma_row[s]
             }
             basket, rank = select_basket(mom_row, eligible, list(lots.keys()),
-                                         top_n, buffer_rank)
+                                         top_n, buffer_rank,
+                                         sectors=sectors, max_per_sector=max_per_sector)
             portfolio_value = cash + holdings_value(prices_row)
             target = portfolio_value / top_n
 

@@ -18,6 +18,9 @@ top_n = st.sidebar.number_input("Basket size (top N)", 1, 50, 10)
 buffer_rank = st.sidebar.number_input("Sell buffer (exit when rank >)", min_value=int(top_n), max_value=100, value=max(20, int(top_n)))
 lookback_days = st.sidebar.number_input("Lookback (trading days)", 20, 400, 252)
 skip_days = st.sidebar.number_input("Skip recent (trading days)", 0, 60, 21)
+max_per_sector = st.sidebar.number_input(
+    "Max holdings per sector (0 = no cap)", 0, int(top_n), 0,
+    help="Limit how many of the basket may come from one GICS sector, to reduce concentration.")
 initial_capital = st.sidebar.number_input("Starting capital ($)", 1000, 10_000_000, 10_000, step=1000)
 start = st.sidebar.text_input("Start date (YYYY-MM-DD)", "2015-01-01")
 end = st.sidebar.text_input("End date (YYYY-MM-DD)", "")
@@ -142,6 +145,17 @@ if st.button("Run backtest", type="primary"):
         st.error(f"Only {len(symbols)} symbols in the DB — fetch the S&P 500 universe first "
                  f"(`python3 -m data.fetch_universe`).")
     else:
+        # Only build the sector map (and enforce the cap) when a cap is set.
+        sectors, cap = None, None
+        if int(max_per_sector) > 0:
+            cap = int(max_per_sector)
+            try:
+                meta = get_sp500_meta()
+                sectors = {s: meta[s]["sector"] for s in symbols if s in meta}
+            except Exception:
+                st.warning("Could not load sector data; running without the sector cap.")
+                cap = None
+
         with st.spinner(f"Ranking {len(symbols)} symbols..."):
             try:
                 result = run_momentum_rotation(
@@ -149,6 +163,7 @@ if st.button("Run backtest", type="primary"):
                     top_n=int(top_n), buffer_rank=int(buffer_rank),
                     lookback_days=int(lookback_days), skip_days=int(skip_days),
                     initial_capital=float(initial_capital),
+                    sectors=sectors, max_per_sector=cap,
                 )
             except ValueError as e:
                 st.session_state.pop("backtest", None)
