@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from backtest.momentum_rotation import compute_momentum, month_end_dates, select_basket, build_price_panel, run_momentum_rotation
 
 
@@ -145,3 +146,14 @@ def test_run_momentum_rotation_carries_last_price_through_nan_gap():
     # B's NaN gap must not be valued at $0 -- equity should hold steady
     # (carried at B's last known price), not collapse on the gap bar.
     assert equity.loc[gap_date] >= equity.loc[prior_date] - 1e-6
+
+
+def test_run_momentum_rotation_raises_value_error_on_empty_price_panel():
+    def empty_loader(symbol, start=None, end=None):
+        return pd.DataFrame(columns=["date", "close", "ma200"])
+
+    with pytest.raises(ValueError):
+        run_momentum_rotation(
+            ["A", "B"], top_n=2, buffer_rank=2,
+            lookback_days=1, skip_days=0, loader=empty_loader,
+        )

@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data.database import list_symbols, load_prices
+from data.sp500_universe import get_sp500_tickers
 from backtest.momentum_rotation import run_momentum_rotation
 
 st.set_page_config(page_title="S&P 500 Momentum Rotation", page_icon="📈", layout="wide")
@@ -20,7 +21,14 @@ initial_capital = st.sidebar.number_input("Starting capital ($)", 1000, 10_000_0
 start = st.sidebar.text_input("Start date (YYYY-MM-DD)", "2015-01-01")
 end = st.sidebar.text_input("End date (YYYY-MM-DD)", "")
 
-symbols = list_symbols(bar_size="1d", source="yfinance")
+available = list_symbols(bar_size="1d", source="yfinance")
+try:
+    constituents = set(get_sp500_tickers())
+    symbols = sorted((set(available) & constituents) - {"SPY"})
+except Exception as e:
+    st.warning(f"Could not load the S&P 500 constituent list ({e}); "
+               f"falling back to all daily symbols in the database (may include non-constituents).")
+    symbols = sorted(set(available) - {"SPY"})
 st.caption(f"{len(symbols)} daily symbols available in the database.")
 
 if st.button("Run backtest", type="primary"):
@@ -30,12 +38,16 @@ if st.button("Run backtest", type="primary"):
         st.stop()
 
     with st.spinner(f"Ranking {len(symbols)} symbols..."):
-        result = run_momentum_rotation(
-            symbols, start=start or None, end=end or None,
-            top_n=int(top_n), buffer_rank=int(buffer_rank),
-            lookback_days=int(lookback_days), skip_days=int(skip_days),
-            initial_capital=float(initial_capital),
-        )
+        try:
+            result = run_momentum_rotation(
+                symbols, start=start or None, end=end or None,
+                top_n=int(top_n), buffer_rank=int(buffer_rank),
+                lookback_days=int(lookback_days), skip_days=int(skip_days),
+                initial_capital=float(initial_capital),
+            )
+        except ValueError as e:
+            st.error(str(e))
+            st.stop()
 
     m = result["metrics"]
     c1, c2, c3, c4 = st.columns(4)

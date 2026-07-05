@@ -82,6 +82,8 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
                           loader: Callable = load_prices) -> dict:
     """Simulate the monthly equal-weight momentum rotation. See module docstring."""
     close, ma200 = build_price_panel(symbols, start, end, loader)
+    if close.empty:
+        raise ValueError("No price data available for the selected symbols and date range.")
     momentum = compute_momentum(close, lookback_days, skip_days)
     rebalance_days = set(month_end_dates(close.index))
 
