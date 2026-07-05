@@ -44,3 +44,33 @@ def compute_metrics(equity_curve: pd.Series, trades: List[dict]) -> dict:
         "avg_win_usd": round(avg_win, 2),
         "avg_loss_usd": round(avg_loss, 2),
     }
+
+
+def yearly_performance(equity_curve: pd.Series) -> pd.DataFrame:
+    """Break an equity curve into calendar-year P&L and returns.
+
+    equity_curve: pd.Series indexed by date, values = portfolio value ($).
+
+    Returns a DataFrame with one row per calendar year and columns:
+      year, start_value, end_value, pnl, return_pct
+    Each year's base (start_value) is the prior year's ending value; the first
+    year uses the curve's first value, so returns compound correctly year over year.
+    """
+    if equity_curve.empty:
+        return pd.DataFrame(columns=["year", "start_value", "end_value", "pnl", "return_pct"])
+
+    s = equity_curve.copy()
+    s.index = pd.to_datetime(s.index)
+    end = s.groupby(s.index.year).last()
+
+    start = end.shift(1)
+    start.iloc[0] = s.iloc[0]
+
+    df = pd.DataFrame({
+        "year": end.index.astype(int),
+        "start_value": start.to_numpy(),
+        "end_value": end.to_numpy(),
+    })
+    df["pnl"] = (df["end_value"] - df["start_value"]).round(2)
+    df["return_pct"] = ((df["end_value"] / df["start_value"] - 1.0) * 100).round(2)
+    return df.reset_index(drop=True)
