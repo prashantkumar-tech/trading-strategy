@@ -13,7 +13,7 @@ st.title("📈 S&P 500 Momentum Rotation")
 # ── Sidebar controls ──────────────────────────────────────────────────────
 st.sidebar.header("Strategy settings")
 top_n = st.sidebar.number_input("Basket size (top N)", 1, 50, 10)
-buffer_rank = st.sidebar.number_input("Sell buffer (exit when rank >)", top_n, 100, 20)
+buffer_rank = st.sidebar.number_input("Sell buffer (exit when rank >)", min_value=int(top_n), max_value=100, value=max(20, int(top_n)))
 lookback_days = st.sidebar.number_input("Lookback (trading days)", 20, 400, 252)
 skip_days = st.sidebar.number_input("Skip recent (trading days)", 0, 60, 21)
 initial_capital = st.sidebar.number_input("Starting capital ($)", 1000, 10_000_000, 10_000, step=1000)
@@ -48,7 +48,7 @@ if st.button("Run backtest", type="primary"):
     fig = go.Figure()
     eq = result["equity_curve"]
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, name="Strategy"))
-    spy = load_prices("SPY", start=start or None, end=end or None)
+    spy = load_prices("SPY", start=start or None, end=end or None, bar_size="1d", source="yfinance")
     if not spy.empty:
         spy = spy.set_index("date")["close"]
         spy_bh = spy / spy.iloc[0] * float(initial_capital)
