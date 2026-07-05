@@ -102,11 +102,16 @@ def build_price_panel(symbols: List[str], start=None, end=None,
 def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=20,
                           lookback_days=252, skip_days=21, initial_capital=10_000.0,
                           loader: Callable = load_prices,
-                          sectors=None, max_per_sector=None) -> dict:
+                          sectors=None, max_per_sector=None, regime=None) -> dict:
     """Simulate the monthly equal-weight momentum rotation. See module docstring.
 
     Passing ``sectors`` ({ticker: sector}) with ``max_per_sector`` caps how many
     holdings may come from any one sector at each rebalance (see select_basket).
+
+    Passing ``regime`` (a bool Series indexed by date) enables a market-regime
+    filter: on any rebalance where ``regime`` is False (risk-off), the strategy
+    sells everything and holds cash until it flips back to True. Dates missing
+    from ``regime`` default to risk-on.
     """
     close, ma200 = build_price_panel(symbols, start, end, loader)
     if close.empty:
@@ -139,9 +144,13 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
                 if pd.notna(mom_row.get(s)) and pd.notna(prices_row.get(s))
                 and pd.notna(ma_row.get(s)) and prices_row[s] > ma_row[s]
             }
-            basket, rank = select_basket(mom_row, eligible, list(lots.keys()),
-                                         top_n, buffer_rank,
-                                         sectors=sectors, max_per_sector=max_per_sector)
+            risk_on = True if regime is None else bool(regime.get(d, True))
+            if risk_on:
+                basket, rank = select_basket(mom_row, eligible, list(lots.keys()),
+                                             top_n, buffer_rank,
+                                             sectors=sectors, max_per_sector=max_per_sector)
+            else:
+                basket, rank = [], {}   # risk-off: liquidate to cash
             portfolio_value = cash + holdings_value(prices_row)
             target = portfolio_value / top_n
 
@@ -157,7 +166,12 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
                 cash += proceeds
                 lot["total_proceeds"] += proceeds
                 pnl = lot["total_proceeds"] - lot["total_cost"]
-                reason = "below 200MA" if s not in eligible else "fell out of top 20"
+                if not risk_on:
+                    reason = "market regime off"
+                elif s not in eligible:
+                    reason = "below 200MA"
+                else:
+                    reason = "fell out of top 20"
                 trades.append({
                     "symbol": s,
                     "entry_date": lot["entry_date"],

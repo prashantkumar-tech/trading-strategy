@@ -167,6 +167,24 @@ def _make_loader(price_map, dates):
     return loader
 
 
+def test_run_momentum_rotation_market_regime_goes_to_cash():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")  # 8 month-end rebalances
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
+    loader = _make_loader(price_map, dates)
+
+    # Risk-on every rebalance except the last -> forced to cash at the end.
+    regime = pd.Series(True, index=dates)
+    regime.iloc[-1] = False
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader, regime=regime,
+    )
+
+    assert result["holdings"] == []   # cashed out on the regime-off rebalance
+    assert any(t["exit_reason"] == "market regime off" for t in result["trades"])
+
+
 def test_run_momentum_rotation_uptrend_grows_equity_and_holds_basket():
     dates = pd.date_range("2020-01-01", periods=8, freq="ME")  # 8 month-ends
     # 12 symbols, all rising; steeper slope = higher momentum
