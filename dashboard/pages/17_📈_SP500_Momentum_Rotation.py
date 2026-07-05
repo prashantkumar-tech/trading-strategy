@@ -60,7 +60,7 @@ st.divider()
 if st.button("Run backtest", type="primary"):
     if len(symbols) < top_n:
         st.error(f"Only {len(symbols)} symbols in the DB — fetch the S&P 500 universe first "
-                 f"(`python -m data.fetch_universe`).")
+                 f"(`python3 -m data.fetch_universe`).")
         st.stop()
 
     with st.spinner(f"Ranking {len(symbols)} symbols..."):
