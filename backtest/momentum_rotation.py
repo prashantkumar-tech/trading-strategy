@@ -186,7 +186,7 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
 
 def momentum_leaderboard(symbols, start=None, end=None, top_n=20,
                          lookback_days=252, skip_days=21,
-                         loader: Callable = load_prices, names=None) -> pd.DataFrame:
+                         loader: Callable = load_prices, meta=None) -> pd.DataFrame:
     """Rank the universe by 12-1 momentum on the most recent available date.
 
     Returns a DataFrame (highest momentum first, truncated to top_n) with
@@ -194,8 +194,9 @@ def momentum_leaderboard(symbols, start=None, end=None, top_n=20,
     momentum on the latest date are excluded. The above_200ma flag shows whether
     each name would pass the strategy's 200-day MA eligibility filter.
 
-    If a ``names`` mapping ({ticker: company name}) is given, a ``name`` column
-    is inserted right after ``symbol`` (unknown tickers map to an empty string).
+    If a ``meta`` mapping ({ticker: {"name": .., "sector": ..}}) is given, ``name``
+    and ``sector`` columns are inserted right after ``symbol`` (unknown tickers or
+    missing fields map to an empty string).
     """
     close, ma200 = build_price_panel(symbols, start, end, loader)
     if close.empty:
@@ -216,11 +217,13 @@ def momentum_leaderboard(symbols, start=None, end=None, top_n=20,
             "momentum_pct": round(float(mom) * 100, 2),
             "above_200ma": above,
         }
-        if names is not None:
-            row["name"] = names.get(sym, "")
+        if meta is not None:
+            info = meta.get(sym, {})
+            row["name"] = info.get("name", "")
+            row["sector"] = info.get("sector", "")
         rows.append(row)
 
     columns = ["rank", "symbol", "momentum_pct", "above_200ma"]
-    if names is not None:
-        columns.insert(2, "name")   # right after symbol
+    if meta is not None:
+        columns[2:2] = ["name", "sector"]   # right after symbol
     return pd.DataFrame(rows, columns=columns)
