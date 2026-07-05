@@ -89,13 +89,18 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
     lots = {}          # symbol -> {shares, total_cost, total_proceeds, entry_price, entry_date}
     trades = []
     equity_curve = []
+    last_price = {}    # symbol -> most recent non-NaN close, for valuation only
 
     def holdings_value(prices_row):
-        return sum(l["shares"] * prices_row[s]
-                   for s, l in lots.items() if pd.notna(prices_row.get(s)))
+        return sum(l["shares"] * last_price[s]
+                   for s, l in lots.items() if s in last_price)
 
     for d in close.index:
         prices_row = close.loc[d]
+        for s in prices_row.index:
+            p = prices_row[s]
+            if pd.notna(p):
+                last_price[s] = p
 
         if d in rebalance_days:
             mom_row = momentum.loc[d]

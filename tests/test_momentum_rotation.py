@@ -103,14 +103,45 @@ def test_run_momentum_rotation_logs_full_exit_when_momentum_collapses():
     price_map["CRASH"] = [100, 130, 170, 210, 250, 120, 90, 60]
     loader = _make_loader(price_map, dates)
 
+    # top_n=5, buffer_rank=6 on this 12-symbol universe: CRASH spikes early
+    # (bought into the small basket), then collapses to the worst rank
+    # (> buffer_rank), forcing a real "fell out of top 20" exit.
     result = run_momentum_rotation(
-        list(price_map.keys()), top_n=10, buffer_rank=20,
+        list(price_map.keys()), top_n=5, buffer_rank=6,
         lookback_days=2, skip_days=1, loader=loader,
     )
 
-    reasons = {t["exit_reason"] for t in result["trades"]}
+    trades = result["trades"]
+    assert len(trades) >= 1
+    crash_trades = [t for t in trades if t["symbol"] == "CRASH"]
+    assert crash_trades, f"expected a CRASH exit, got trades: {trades}"
+    assert crash_trades[0]["exit_reason"] == "fell out of top 20"
+
+    reasons = {t["exit_reason"] for t in trades}
     assert reasons.issubset({"fell out of top 20", "below 200MA"})
     # every trade carries the required schema
-    for t in result["trades"]:
+    for t in trades:
         assert {"symbol", "entry_date", "exit_date", "pnl", "return_pct",
                 "exit_reason", "rank_at_exit"} <= set(t.keys())
+
+
+def test_run_momentum_rotation_carries_last_price_through_nan_gap():
+    dates = pd.date_range("2020-01-01", periods=4, freq="ME")
+    # Two symbols, both eligible and held; B has a NaN gap on the 3rd bar.
+    price_map = {
+        "A": [100.0, 101.0, 102.0, 103.0],
+        "B": [100.0, 101.0, np.nan, 103.0],
+    }
+    loader = _make_loader(price_map, dates)
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=2, buffer_rank=2,
+        lookback_days=1, skip_days=0, loader=loader,
+    )
+
+    equity = result["equity_curve"]
+    gap_date = dates[2]
+    prior_date = dates[1]
+    # B's NaN gap must not be valued at $0 -- equity should hold steady
+    # (carried at B's last known price), not collapse on the gap bar.
+    assert equity.loc[gap_date] >= equity.loc[prior_date] - 1e-6
