@@ -32,55 +32,14 @@ except Exception as e:
     symbols = sorted(set(available) - {"SPY"})
 st.caption(f"{len(symbols)} daily symbols available in the database.")
 
-# ── Momentum leaderboard ──────────────────────────────────────────────────
-st.subheader("📊 Momentum leaderboard")
-st.caption("Top names ranked by 12-1 momentum as of the latest available date. "
-           "`above_200ma` = passes the strategy's trend filter (only these are eligible to be held).")
-leaderboard_n = st.number_input("Show top N", 5, 100, 20, key="leaderboard_n")
-if st.button("Show leaderboard"):
-    if not symbols:
-        st.error("No symbols in the DB — fetch the S&P 500 universe first "
-                 "(`python3 -m data.fetch_universe`).")
-    else:
-        with st.spinner(f"Ranking {len(symbols)} symbols..."):
-            try:
-                try:
-                    meta = get_sp500_meta()
-                except Exception:
-                    meta = None
-                board = momentum_leaderboard(
-                    symbols, start=start or None, end=end or None,
-                    top_n=int(leaderboard_n),
-                    lookback_days=int(lookback_days), skip_days=int(skip_days),
-                    meta=meta,
-                )
-            except ValueError as e:
-                st.error(str(e))
-                st.stop()
-        eligible_count = int(board["above_200ma"].sum())
-        st.caption(f"{eligible_count} of the top {len(board)} pass the 200-day MA filter.")
-        st.dataframe(board, use_container_width=True, hide_index=True)
+def render_leaderboard(board):
+    eligible_count = int(board["above_200ma"].sum())
+    st.caption(f"{eligible_count} of the top {len(board)} pass the 200-day MA filter.")
+    st.dataframe(board, use_container_width=True, hide_index=True)
 
-st.divider()
 
-if st.button("Run backtest", type="primary"):
-    if len(symbols) < top_n:
-        st.error(f"Only {len(symbols)} symbols in the DB — fetch the S&P 500 universe first "
-                 f"(`python3 -m data.fetch_universe`).")
-        st.stop()
-
-    with st.spinner(f"Ranking {len(symbols)} symbols..."):
-        try:
-            result = run_momentum_rotation(
-                symbols, start=start or None, end=end or None,
-                top_n=int(top_n), buffer_rank=int(buffer_rank),
-                lookback_days=int(lookback_days), skip_days=int(skip_days),
-                initial_capital=float(initial_capital),
-            )
-        except ValueError as e:
-            st.error(str(e))
-            st.stop()
-
+def render_backtest(bt):
+    result, eq, spy_bh, comp = bt["result"], bt["eq"], bt["spy_bh"], bt["comp"]
     m = result["metrics"]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total return", f"{m['total_return_pct']}%")
@@ -88,15 +47,6 @@ if st.button("Run backtest", type="primary"):
     c3.metric("Sharpe", m["sharpe_ratio"])
     c4.metric("Max drawdown", f"{m['max_drawdown_pct']}%")
 
-    # SPY buy & hold, normalized to the same starting capital (reused below).
-    eq = result["equity_curve"]
-    spy = load_prices("SPY", start=start or None, end=end or None, bar_size="1d", source="yfinance")
-    spy_bh = None
-    if not spy.empty:
-        spy_close = spy.set_index("date")["close"]
-        spy_bh = spy_close / spy_close.iloc[0] * float(initial_capital)
-
-    # Equity curve vs SPY buy & hold
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, name="Strategy"))
     if spy_bh is not None:
@@ -104,17 +54,7 @@ if st.button("Run backtest", type="primary"):
     fig.update_layout(title="Equity curve", xaxis_title="Date", yaxis_title="Portfolio value ($)")
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Yearly performance vs S&P 500 ──────────────────────────────────────
     st.subheader("Yearly performance vs S&P 500")
-    strat_yp = yearly_performance(eq).rename(
-        columns={"return_pct": "strategy_pct", "pnl": "strategy_pnl"})
-    comp = strat_yp[["year", "strategy_pct", "strategy_pnl"]].copy()
-    if spy_bh is not None:
-        spy_yp = yearly_performance(spy_bh).rename(
-            columns={"return_pct": "spy_pct", "pnl": "spy_pnl"})
-        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_pnl"]], on="year", how="left")
-        comp["outperformance_pp"] = (comp["strategy_pct"] - comp["spy_pct"]).round(2)
-
     if comp.empty:
         st.info("Not enough history to compute yearly performance for this window.")
     else:
@@ -128,12 +68,9 @@ if st.button("Run backtest", type="primary"):
         st.plotly_chart(ybar, use_container_width=True)
 
         rename = {
-            "year": "Year",
-            "strategy_pct": "Strategy %",
-            "spy_pct": "SPY %",
+            "year": "Year", "strategy_pct": "Strategy %", "spy_pct": "SPY %",
             "outperformance_pp": "Outperformance (pp)",
-            "strategy_pnl": "Strategy P&L ($)",
-            "spy_pnl": "SPY P&L ($)",
+            "strategy_pnl": "Strategy P&L ($)", "spy_pnl": "SPY P&L ($)",
         }
         order = [c for c in ["year", "strategy_pct", "spy_pct", "outperformance_pp",
                              "strategy_pnl", "spy_pnl"] if c in comp.columns]
@@ -149,5 +86,89 @@ if st.button("Run backtest", type="primary"):
         st.info("No completed round-trip trades in this window.")
     else:
         st.dataframe(trades_df, use_container_width=True)
+
+
+def build_comparison(eq, spy_bh):
+    strat_yp = yearly_performance(eq).rename(
+        columns={"return_pct": "strategy_pct", "pnl": "strategy_pnl"})
+    comp = strat_yp[["year", "strategy_pct", "strategy_pnl"]].copy()
+    if spy_bh is not None:
+        spy_yp = yearly_performance(spy_bh).rename(
+            columns={"return_pct": "spy_pct", "pnl": "spy_pnl"})
+        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_pnl"]], on="year", how="left")
+        comp["outperformance_pp"] = (comp["strategy_pct"] - comp["spy_pct"]).round(2)
+    return comp
+
+
+# ── Momentum leaderboard ──────────────────────────────────────────────────
+# Results are stored in st.session_state and rendered every run, so running a
+# backtest does not clear the leaderboard (and vice versa) despite Streamlit
+# re-executing the whole script on each button click.
+st.subheader("📊 Momentum leaderboard")
+st.caption("Top names ranked by 12-1 momentum as of the latest available date. "
+           "`above_200ma` = passes the strategy's trend filter (only these are eligible to be held).")
+leaderboard_n = st.number_input("Show top N", 5, 100, 20, key="leaderboard_n")
+if st.button("Show leaderboard"):
+    if not symbols:
+        st.session_state.pop("leaderboard", None)
+        st.error("No symbols in the DB — fetch the S&P 500 universe first "
+                 "(`python3 -m data.fetch_universe`).")
+    else:
+        with st.spinner(f"Ranking {len(symbols)} symbols..."):
+            try:
+                meta = get_sp500_meta()
+            except Exception:
+                meta = None
+            try:
+                st.session_state["leaderboard"] = momentum_leaderboard(
+                    symbols, start=start or None, end=end or None,
+                    top_n=int(leaderboard_n),
+                    lookback_days=int(lookback_days), skip_days=int(skip_days),
+                    meta=meta,
+                )
+            except ValueError as e:
+                st.session_state.pop("leaderboard", None)
+                st.error(str(e))
+
+if "leaderboard" in st.session_state:
+    render_leaderboard(st.session_state["leaderboard"])
+
+st.divider()
+
+# ── Backtest ───────────────────────────────────────────────────────────────
+if st.button("Run backtest", type="primary"):
+    if len(symbols) < top_n:
+        st.session_state.pop("backtest", None)
+        st.error(f"Only {len(symbols)} symbols in the DB — fetch the S&P 500 universe first "
+                 f"(`python3 -m data.fetch_universe`).")
+    else:
+        with st.spinner(f"Ranking {len(symbols)} symbols..."):
+            try:
+                result = run_momentum_rotation(
+                    symbols, start=start or None, end=end or None,
+                    top_n=int(top_n), buffer_rank=int(buffer_rank),
+                    lookback_days=int(lookback_days), skip_days=int(skip_days),
+                    initial_capital=float(initial_capital),
+                )
+            except ValueError as e:
+                st.session_state.pop("backtest", None)
+                st.error(str(e))
+                result = None
+
+        if result is not None:
+            eq = result["equity_curve"]
+            spy = load_prices("SPY", start=start or None, end=end or None,
+                              bar_size="1d", source="yfinance")
+            spy_bh = None
+            if not spy.empty:
+                spy_close = spy.set_index("date")["close"]
+                spy_bh = spy_close / spy_close.iloc[0] * float(initial_capital)
+            st.session_state["backtest"] = {
+                "result": result, "eq": eq, "spy_bh": spy_bh,
+                "comp": build_comparison(eq, spy_bh),
+            }
+
+if "backtest" in st.session_state:
+    render_backtest(st.session_state["backtest"])
 else:
     st.info("Set parameters in the sidebar and click **Run backtest**.")
