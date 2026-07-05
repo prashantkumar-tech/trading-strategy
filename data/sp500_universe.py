@@ -13,7 +13,7 @@ import pandas as pd
 
 WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 CACHE_PATH = Path(__file__).parent / "sp500_tickers.txt"
-NAMES_CACHE_PATH = Path(__file__).parent / "sp500_names.tsv"
+META_CACHE_PATH = Path(__file__).parent / "sp500_meta.tsv"
 
 # Wikipedia 403s the default urllib user-agent, so identify as a browser.
 _USER_AGENT = (
@@ -32,9 +32,12 @@ def parse_sp500_table(df: pd.DataFrame) -> List[str]:
     return [normalize_ticker(str(s)) for s in df["Symbol"].tolist()]
 
 
-def parse_sp500_names(df: pd.DataFrame) -> Dict[str, str]:
-    """Map normalized ticker -> company name from a Wikipedia constituents DataFrame."""
-    return {normalize_ticker(str(s)): str(n) for s, n in zip(df["Symbol"], df["Security"])}
+def parse_sp500_meta(df: pd.DataFrame) -> Dict[str, dict]:
+    """Map normalized ticker -> {"name": company name, "sector": GICS sector}."""
+    return {
+        normalize_ticker(str(s)): {"name": str(n), "sector": str(sec)}
+        for s, n, sec in zip(df["Symbol"], df["Security"], df["GICS Sector"])
+    }
 
 
 def _fetch_wiki_tables() -> List[pd.DataFrame]:
@@ -66,26 +69,29 @@ def get_sp500_tickers(use_cache: bool = True) -> List[str]:
     return tickers
 
 
-def get_sp500_names(use_cache: bool = True) -> Dict[str, str]:
-    """Return a {ticker: company name} mapping from Wikipedia, cached to a TSV file.
+def get_sp500_meta(use_cache: bool = True) -> Dict[str, dict]:
+    """Return {ticker: {"name": .., "sector": ..}} from Wikipedia, cached to a TSV file.
 
     Raises RuntimeError with a clear message if the list cannot be fetched or parsed.
     """
-    if use_cache and NAMES_CACHE_PATH.exists():
-        names = {}
-        for line in NAMES_CACHE_PATH.read_text().splitlines():
-            if "\t" in line:
-                sym, name = line.split("\t", 1)
-                names[normalize_ticker(sym)] = name
-        return names
+    if use_cache and META_CACHE_PATH.exists():
+        meta = {}
+        for line in META_CACHE_PATH.read_text().splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                sym, name, sector = parts
+                meta[normalize_ticker(sym)] = {"name": name, "sector": sector}
+        return meta
 
     try:
         tables = _fetch_wiki_tables()
-        names = parse_sp500_names(tables[0])
+        meta = parse_sp500_meta(tables[0])
     except Exception as exc:
         raise RuntimeError(
-            f"Could not fetch the S&P 500 company names from Wikipedia ({exc})."
+            f"Could not fetch the S&P 500 constituent metadata from Wikipedia ({exc})."
         ) from exc
 
-    NAMES_CACHE_PATH.write_text("\n".join(f"{s}\t{n}" for s, n in names.items()) + "\n")
-    return names
+    META_CACHE_PATH.write_text(
+        "\n".join(f"{s}\t{v['name']}\t{v['sector']}" for s, v in meta.items()) + "\n"
+    )
+    return meta

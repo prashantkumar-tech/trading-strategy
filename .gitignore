@@ -22,7 +22,7 @@ venv/
 
 # Generated data caches
 data/sp500_tickers.txt
-data/sp500_names.tsv
+data/sp500_meta.tsv
 
 # OS
 .DS_Store
