@@ -18,6 +18,11 @@ venv/
 
 # Claude Code
 .claude/
+.superpowers/
+
+# Generated data caches
+data/sp500_tickers.txt
+data/sp500_names.tsv
 
 # OS
 .DS_Store
