@@ -26,3 +26,5 @@ data/sp500_meta.tsv
 
 # OS
 .DS_Store
+data/broad_tickers.tsv
+data/broad_marketcap.tsv
