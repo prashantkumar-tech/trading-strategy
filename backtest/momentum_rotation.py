@@ -289,5 +289,9 @@ def momentum_leaderboard(symbols, start=None, end=None, top_n=20,
 
     columns = ["rank", "symbol", "momentum_pct", "above_200ma"]
     if meta is not None:
-        columns[2:2] = ["name", "sector"]   # right after symbol
+        # Always show name; only show sector when the universe actually has it.
+        insert = ["name"]
+        if any(r.get("sector") for r in rows):
+            insert.append("sector")
+        columns[2:2] = insert
     return pd.DataFrame(rows, columns=columns)
