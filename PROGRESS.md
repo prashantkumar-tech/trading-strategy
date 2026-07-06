@@ -2,7 +2,67 @@
 
 **Repository:** https://github.com/prashantkumar-tech/trading-strategy
 **Started:** 2026-03-30
-**Last updated:** 2026-03-31
+**Last updated:** 2026-07-06
+
+---
+
+## Momentum Rotation System (current focus, added 2026-07)
+
+A cross-sectional momentum rotation strategy, separate from the rule-builder/optimizer
+work below. Design + plan in `docs/superpowers/`.
+
+**Strategy:** each month, rank a universe by 12-1 momentum (return over ~252 trading days
+skipping the most recent ~21), hold an equal-weight top-10 basket of names above their own
+200-day MA, and rotate a holding out only once it falls past rank 20 (hold buffer).
+
+**Key files:**
+- `backtest/momentum_rotation.py` — the engine: `run_momentum_rotation()`, `momentum_leaderboard()`,
+  `select_basket()` (with optional per-sector cap), `build_price_panel()`, `compute_momentum()`.
+  Optional knobs: `sectors`+`max_per_sector` (sector cap), `regime` (SPY 200-MA cash filter).
+  Returns equity_curve, invested_curve, trades (closed round-trips), open_positions, metrics, holdings.
+- `backtest/metrics.py` — `yearly_performance()` (per-year P&L, return, intra-year max drawdown).
+- `data/sp500_universe.py` — S&P 500 list + name/sector from Wikipedia (browser UA; 503 names).
+- `data/broad_universe.py` — broad universe from NASDAQ Trader symbol directories
+  (`nasdaqlisted.txt`/`otherlisted.txt`), common-stock filtered, market-cap floor via the
+  NASDAQ screener bulk API. `get_broad_universe(min_market_cap)`.
+- `data/fetch_universe.py` / `data/fetch_broad_universe.py` — bulk price fetch (per-symbol,
+  skips symbols already in DB). Run: `python3 -m data.fetch_broad_universe`.
+- `dashboard/momentum_page.py` — shared page renderer; pages 17 (S&P 500) and 18 (Broad Market)
+  are thin wrappers, per-page session/cache key prefixes.
+- `dashboard/pages/17_📈_SP500_Momentum_Rotation.py`, `18_🌐_Broad_Market_Momentum_Rotation.py`.
+- `dashboard/backtest_cache.py` — pickles last leaderboard/backtest to gitignored
+  `db/dashboard_cache/` so results survive a Streamlit restart.
+
+**Dashboard features (both pages):** momentum leaderboard (rank/name/[sector]/momentum/200-MA flag),
+backtest with Strategy + S&P 500 metric rows, equity curve vs SPY, yearly table
+(return, max DD, end-of-year value, invested vs cash, P&L for strategy & SPY), open-positions table,
+closed-trade log, sector cap + regime-filter controls. Broad page adds a market-cap floor control
+(default $2B). Results persist across restarts.
+
+**Data in DB (`db/trading.db`, gitignored):** ~2,025 daily symbols — S&P 500 (503) plus broad
+universe ≥$1B (~1,957 with data). Universe caches (gitignored): `data/broad_tickers.tsv`,
+`data/broad_marketcap.tsv`, `data/sp500_*.{txt,tsv}`.
+
+**Experiment findings (2015→now, top-10, monthly, 200-MA filter, vs SPY B&H 13.5% ann / 0.80 Sharpe):**
+| Universe | Ann % | Sharpe | Max DD % |
+|---|---|---|---|
+| S&P 500 (503) | 48.0 | 1.34 | −41.4 |
+| Broad ≥$1B (2025) | 57.6 | 1.18 | −49.5 |
+| Broad ≥$2B (1624) | 65.1 | 1.29 | −47.7 |
+| Broad ≥$5B (1095) | 61.9 | 1.37 | −54.1 |
+
+Broader universe = higher headline return but **not** better risk-adjusted (deeper drawdowns).
+The edge comes from concentrated bets on a few survivorship-inflated small/mid-cap names; the
+market-cap floor is second-order noise (non-monotonic sweep); widening the basket to top-30 cut
+returns (~65%→47% ann) without reducing drawdown (systematic, correlated, not idiosyncratic risk).
+**All backtests ignore trading costs/taxes and use today's constituent lists (survivorship-biased),
+so results are optimistic — treat the broad-universe edge as an upper bound.**
+
+**Tests:** `python3 -m pytest -q` (35 passing). **Run app:** `python3 -m streamlit run dashboard/app.py`.
+
+**Possible next steps:** min-price/dollar-volume filter to strip micro-cap artifacts (e.g. AXTI-style
+5000% momentum); persist sidebar settings alongside cached results; point-in-time constituent lists
+to reduce survivorship bias; transaction-cost modeling; retry the ~68 rate-limited broad symbols.
 
 ---
 
