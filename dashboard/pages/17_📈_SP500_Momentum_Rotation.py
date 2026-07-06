@@ -77,10 +77,13 @@ def render_backtest(bt):
             "year": "Year", "strategy_pct": "Strategy %", "spy_pct": "SPY %",
             "outperformance_pp": "Outperformance (pp)",
             "strategy_maxdd": "Strategy Max DD %", "spy_maxdd": "SPY Max DD %",
+            "strategy_value": "Strategy Value ($)", "spy_value": "SPY Value ($)",
+            "strategy_invested": "Strategy Invested ($)", "strategy_cash": "Strategy Cash ($)",
             "strategy_pnl": "Strategy P&L ($)", "spy_pnl": "SPY P&L ($)",
         }
         order = [c for c in ["year", "strategy_pct", "spy_pct", "outperformance_pp",
                              "strategy_maxdd", "spy_maxdd",
+                             "strategy_value", "strategy_invested", "strategy_cash", "spy_value",
                              "strategy_pnl", "spy_pnl"] if c in comp.columns]
         st.dataframe(comp[order].rename(columns=rename),
                      use_container_width=True, hide_index=True)
@@ -96,18 +99,26 @@ def render_backtest(bt):
         st.dataframe(trades_df, use_container_width=True)
 
 
-def build_comparison(eq, spy_bh):
+def build_comparison(eq, spy_bh, invested_curve=None):
     strat_yp = yearly_performance(eq).rename(columns={
         "return_pct": "strategy_pct", "pnl": "strategy_pnl",
-        "max_drawdown_pct": "strategy_maxdd"})
-    comp = strat_yp[["year", "strategy_pct", "strategy_maxdd", "strategy_pnl"]].copy()
+        "max_drawdown_pct": "strategy_maxdd", "end_value": "strategy_value"})
+    comp = strat_yp[["year", "strategy_pct", "strategy_maxdd",
+                     "strategy_pnl", "strategy_value"]].copy()
     if spy_bh is not None:
         spy_yp = yearly_performance(spy_bh).rename(columns={
             "return_pct": "spy_pct", "pnl": "spy_pnl",
-            "max_drawdown_pct": "spy_maxdd"})
-        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_maxdd", "spy_pnl"]],
+            "max_drawdown_pct": "spy_maxdd", "end_value": "spy_value"})
+        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_maxdd", "spy_pnl", "spy_value"]],
                           on="year", how="left")
         comp["outperformance_pp"] = (comp["strategy_pct"] - comp["spy_pct"]).round(2)
+    if invested_curve is not None and not invested_curve.empty:
+        inv = invested_curve.copy()
+        inv.index = pd.to_datetime(inv.index)
+        inv_by_year = inv.groupby(inv.index.year).last()   # year-end invested value
+        comp["strategy_invested"] = comp["year"].map(inv_by_year).round(2)
+        # cash is never negative in the sim; clip away tiny float-rounding -0.00s.
+        comp["strategy_cash"] = (comp["strategy_value"] - comp["strategy_invested"]).clip(lower=0).round(2)
     return comp
 
 
@@ -200,7 +211,7 @@ if st.button("Run backtest", type="primary"):
                 spy_bh = spy_close / spy_close.iloc[0] * float(initial_capital)
             st.session_state["backtest"] = {
                 "result": result, "eq": eq, "spy_bh": spy_bh,
-                "comp": build_comparison(eq, spy_bh),
+                "comp": build_comparison(eq, spy_bh, result["invested_curve"]),
             }
 
 if "backtest" in st.session_state:
