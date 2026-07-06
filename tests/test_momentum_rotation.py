@@ -185,6 +185,38 @@ def test_run_momentum_rotation_market_regime_goes_to_cash():
     assert any(t["exit_reason"] == "market regime off" for t in result["trades"])
 
 
+def test_run_momentum_rotation_reports_invested_curve():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
+    loader = _make_loader(price_map, dates)
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader,
+    )
+    inv = result["invested_curve"]
+    eq = result["equity_curve"]
+
+    assert list(inv.index) == list(eq.index)
+    assert (inv <= eq + 1e-6).all()      # invested never exceeds total equity
+    assert inv.iloc[-1] > 0              # fully-invested uptrend at the end
+
+
+def test_run_momentum_rotation_invested_is_zero_when_regime_off():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
+    loader = _make_loader(price_map, dates)
+    regime = pd.Series(True, index=dates)
+    regime.iloc[-1] = False
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader, regime=regime,
+    )
+    # cashed out on the final rebalance -> nothing invested, all in cash
+    assert abs(result["invested_curve"].iloc[-1]) < 1e-6
+
+
 def test_run_momentum_rotation_uptrend_grows_equity_and_holds_basket():
     dates = pd.date_range("2020-01-01", periods=8, freq="ME")  # 8 month-ends
     # 12 symbols, all rising; steeper slope = higher momentum

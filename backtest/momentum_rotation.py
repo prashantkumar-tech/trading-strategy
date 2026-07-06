@@ -213,12 +213,17 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
                     lots[s]["total_proceeds"] += proceeds
                     cash += proceeds
 
-        equity_curve.append({"date": d, "portfolio_value": cash + holdings_value(prices_row)})
+        invested = holdings_value(prices_row)
+        equity_curve.append({"date": d, "portfolio_value": cash + invested,
+                             "invested": invested})
 
-    equity_series = pd.DataFrame(equity_curve).set_index("date")["portfolio_value"]
+    ec = pd.DataFrame(equity_curve).set_index("date")
+    equity_series = ec["portfolio_value"]
+    invested_series = ec["invested"]
     metrics = compute_metrics(equity_series, trades)
     return {
         "equity_curve": equity_series,
+        "invested_curve": invested_series,
         "trades": trades,
         "metrics": metrics,
         "final_value": round(float(equity_series.iloc[-1]), 2) if not equity_series.empty else initial_capital,
