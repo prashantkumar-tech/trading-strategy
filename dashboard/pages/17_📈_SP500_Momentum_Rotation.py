@@ -1,5 +1,7 @@
 """S&P 500 Momentum Rotation — Streamlit page."""
 
+from datetime import datetime
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -7,7 +9,16 @@ import streamlit as st
 from data.database import list_symbols, load_prices
 from data.sp500_universe import get_sp500_tickers, get_sp500_meta
 from backtest.momentum_rotation import run_momentum_rotation, momentum_leaderboard
-from backtest.metrics import yearly_performance
+from backtest.metrics import yearly_performance, compute_metrics
+from dashboard import backtest_cache
+
+# Restore the last leaderboard / backtest from disk so a Streamlit restart
+# doesn't force a re-run. session_state (per-process) is checked first.
+for _key in ("leaderboard", "backtest"):
+    if _key not in st.session_state:
+        _saved = backtest_cache.load(_key)
+        if _saved is not None:
+            st.session_state[_key] = _saved
 
 st.set_page_config(page_title="S&P 500 Momentum Rotation", page_icon="📈", layout="wide")
 st.title("📈 S&P 500 Momentum Rotation")
@@ -46,12 +57,25 @@ def render_leaderboard(board):
 
 def render_backtest(bt):
     result, eq, spy_bh, comp = bt["result"], bt["eq"], bt["spy_bh"], bt["comp"]
+    spy_metrics = bt.get("spy_metrics")
+    if bt.get("ran_at"):
+        st.caption(f"Last run: {bt['ran_at']}")
+
     m = result["metrics"]
+    st.markdown("###### Strategy")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total return", f"{m['total_return_pct']}%")
     c2.metric("Annualized", f"{m['annualized_return_pct']}%")
     c3.metric("Sharpe", m["sharpe_ratio"])
     c4.metric("Max drawdown", f"{m['max_drawdown_pct']}%")
+
+    if spy_metrics is not None:
+        st.markdown("###### S&P 500 (buy & hold)")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Total return", f"{spy_metrics['total_return_pct']}%")
+        d2.metric("Annualized", f"{spy_metrics['annualized_return_pct']}%")
+        d3.metric("Sharpe", spy_metrics["sharpe_ratio"])
+        d4.metric("Max drawdown", f"{spy_metrics['max_drawdown_pct']}%")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, name="Strategy"))
@@ -148,6 +172,7 @@ if st.button("Show leaderboard"):
                     lookback_days=int(lookback_days), skip_days=int(skip_days),
                     meta=meta,
                 )
+                backtest_cache.save("leaderboard", st.session_state["leaderboard"])
             except ValueError as e:
                 st.session_state.pop("leaderboard", None)
                 st.error(str(e))
@@ -205,14 +230,17 @@ if st.button("Run backtest", type="primary"):
             eq = result["equity_curve"]
             spy = load_prices("SPY", start=start or None, end=end or None,
                               bar_size="1d", source="yfinance")
-            spy_bh = None
+            spy_bh, spy_metrics = None, None
             if not spy.empty:
                 spy_close = spy.set_index("date")["close"]
                 spy_bh = spy_close / spy_close.iloc[0] * float(initial_capital)
+                spy_metrics = compute_metrics(spy_bh, [])
             st.session_state["backtest"] = {
-                "result": result, "eq": eq, "spy_bh": spy_bh,
+                "result": result, "eq": eq, "spy_bh": spy_bh, "spy_metrics": spy_metrics,
                 "comp": build_comparison(eq, spy_bh, result["invested_curve"]),
+                "ran_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
+            backtest_cache.save("backtest", st.session_state["backtest"])
 
 if "backtest" in st.session_state:
     render_backtest(st.session_state["backtest"])
