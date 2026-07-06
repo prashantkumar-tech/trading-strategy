@@ -185,6 +185,27 @@ def test_run_momentum_rotation_market_regime_goes_to_cash():
     assert any(t["exit_reason"] == "market regime off" for t in result["trades"])
 
 
+def test_run_momentum_rotation_reports_open_positions():
+    dates = pd.date_range("2020-01-01", periods=8, freq="ME")
+    price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
+    loader = _make_loader(price_map, dates)
+
+    result = run_momentum_rotation(
+        list(price_map.keys()), top_n=10, buffer_rank=20,
+        lookback_days=2, skip_days=1, loader=loader,
+    )
+    ops = result["open_positions"]
+
+    # one open position per current holding, each with full purchase detail
+    assert {p["symbol"] for p in ops} == set(result["holdings"])
+    required = {"symbol", "entry_date", "entry_price", "shares",
+                "current_price", "market_value", "return_since_entry_pct"}
+    for p in ops:
+        assert required <= set(p.keys())
+        assert p["shares"] > 0
+        assert p["market_value"] > 0
+
+
 def test_run_momentum_rotation_reports_invested_curve():
     dates = pd.date_range("2020-01-01", periods=8, freq="ME")
     price_map = {f"S{i}": list(100 + np.arange(8) * i) for i in range(1, 13)}
