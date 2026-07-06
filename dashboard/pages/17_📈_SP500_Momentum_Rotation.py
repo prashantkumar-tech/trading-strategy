@@ -112,10 +112,21 @@ def render_backtest(bt):
         st.dataframe(comp[order].rename(columns=rename),
                      use_container_width=True, hide_index=True)
 
-    st.subheader("Current basket")
-    st.write(result["holdings"])
+    st.subheader("Open positions")
+    st.caption("Current holdings — the purchases still open, valued at the latest price.")
+    open_df = pd.DataFrame(result.get("open_positions", []))
+    if open_df.empty:
+        st.info("No open positions (fully in cash).")
+    else:
+        rename = {
+            "symbol": "Symbol", "entry_date": "Entry date", "entry_price": "Entry price",
+            "shares": "Shares", "current_price": "Current price",
+            "market_value": "Market value ($)", "return_since_entry_pct": "Return since entry %",
+        }
+        st.dataframe(open_df.rename(columns=rename), use_container_width=True, hide_index=True)
 
-    st.subheader("Rotation / trade log")
+    st.subheader("Rotation / trade log (closed round-trips)")
+    st.caption("Each row is a position that was bought and later sold (entry → exit).")
     trades_df = pd.DataFrame(result["trades"])
     if trades_df.empty:
         st.info("No completed round-trip trades in this window.")

@@ -221,10 +221,27 @@ def run_momentum_rotation(symbols, start=None, end=None, top_n=10, buffer_rank=2
     equity_series = ec["portfolio_value"]
     invested_series = ec["invested"]
     metrics = compute_metrics(equity_series, trades)
+
+    # Currently-held positions (purchases not yet closed), valued at last price.
+    open_positions = []
+    for s, lot in lots.items():
+        cur = last_price.get(s)
+        open_positions.append({
+            "symbol": s,
+            "entry_date": lot["entry_date"],
+            "entry_price": round(lot["entry_price"], 4),
+            "shares": round(lot["shares"], 6),
+            "current_price": round(cur, 4) if cur is not None else None,
+            "market_value": round(lot["shares"] * cur, 2) if cur is not None else None,
+            "return_since_entry_pct": round((cur / lot["entry_price"] - 1) * 100, 2)
+                                      if cur is not None else None,
+        })
+
     return {
         "equity_curve": equity_series,
         "invested_curve": invested_series,
         "trades": trades,
+        "open_positions": open_positions,
         "metrics": metrics,
         "final_value": round(float(equity_series.iloc[-1]), 2) if not equity_series.empty else initial_capital,
         "holdings": list(lots.keys()),
