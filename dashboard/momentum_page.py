@@ -126,13 +126,16 @@ def _render_backtest(bt):
 
 
 def render_momentum_page(*, page_title, page_icon, universe_label,
-                         get_tickers, get_meta, cache_prefix, fetch_hint):
+                         get_tickers, get_meta, cache_prefix, fetch_hint,
+                         default_cap_floor_bn=None):
     """Render a full momentum-rotation page for a given universe.
 
     get_tickers() -> iterable of constituent tickers for this universe.
     get_meta()    -> {ticker: {"name":.., "sector":..}} or None (may raise).
     cache_prefix  -> namespaces the session_state / on-disk cache keys per page.
     fetch_hint    -> shell command shown when the universe has no local data.
+    default_cap_floor_bn -> if set, show a "Market cap floor ($B)" sidebar
+        control (default this value) and call get_tickers(min_market_cap=floor).
     """
     st.set_page_config(page_title=page_title, page_icon=page_icon, layout="wide")
 
@@ -162,14 +165,24 @@ def render_momentum_page(*, page_title, page_icon, universe_label,
     start = st.sidebar.text_input("Start date (YYYY-MM-DD)", "2015-01-01")
     end = st.sidebar.text_input("End date (YYYY-MM-DD)", "")
 
+    cap_floor = None
+    if default_cap_floor_bn is not None:
+        cap_floor = st.sidebar.number_input(
+            "Market cap floor ($B)", min_value=1.0, max_value=100.0,
+            value=float(default_cap_floor_bn), step=0.5,
+            help="Only include names with current market cap at least this large. "
+                 "Prices are on hand for the >=$1B set, so raising the floor is instant.")
+
     available = set(list_symbols(bar_size="1d", source="yfinance"))
     try:
-        symbols = sorted((available & set(get_tickers())) - {"SPY"})
+        tickers = get_tickers(min_market_cap=cap_floor * 1e9) if cap_floor is not None else get_tickers()
+        symbols = sorted((available & set(tickers)) - {"SPY"})
     except Exception as e:
         st.warning(f"Could not load the {universe_label} list ({e}); "
                    f"falling back to all daily symbols in the database.")
         symbols = sorted(available - {"SPY"})
-    st.caption(f"{len(symbols)} {universe_label} symbols with data in the database.")
+    label = f"{universe_label} (≥${cap_floor:g}B)" if cap_floor is not None else universe_label
+    st.caption(f"{len(symbols)} {label} symbols with data in the database.")
 
     def _meta_or_none():
         if get_meta is None:
