@@ -76,9 +76,11 @@ def render_backtest(bt):
         rename = {
             "year": "Year", "strategy_pct": "Strategy %", "spy_pct": "SPY %",
             "outperformance_pp": "Outperformance (pp)",
+            "strategy_maxdd": "Strategy Max DD %", "spy_maxdd": "SPY Max DD %",
             "strategy_pnl": "Strategy P&L ($)", "spy_pnl": "SPY P&L ($)",
         }
         order = [c for c in ["year", "strategy_pct", "spy_pct", "outperformance_pp",
+                             "strategy_maxdd", "spy_maxdd",
                              "strategy_pnl", "spy_pnl"] if c in comp.columns]
         st.dataframe(comp[order].rename(columns=rename),
                      use_container_width=True, hide_index=True)
@@ -95,13 +97,16 @@ def render_backtest(bt):
 
 
 def build_comparison(eq, spy_bh):
-    strat_yp = yearly_performance(eq).rename(
-        columns={"return_pct": "strategy_pct", "pnl": "strategy_pnl"})
-    comp = strat_yp[["year", "strategy_pct", "strategy_pnl"]].copy()
+    strat_yp = yearly_performance(eq).rename(columns={
+        "return_pct": "strategy_pct", "pnl": "strategy_pnl",
+        "max_drawdown_pct": "strategy_maxdd"})
+    comp = strat_yp[["year", "strategy_pct", "strategy_maxdd", "strategy_pnl"]].copy()
     if spy_bh is not None:
-        spy_yp = yearly_performance(spy_bh).rename(
-            columns={"return_pct": "spy_pct", "pnl": "spy_pnl"})
-        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_pnl"]], on="year", how="left")
+        spy_yp = yearly_performance(spy_bh).rename(columns={
+            "return_pct": "spy_pct", "pnl": "spy_pnl",
+            "max_drawdown_pct": "spy_maxdd"})
+        comp = comp.merge(spy_yp[["year", "spy_pct", "spy_maxdd", "spy_pnl"]],
+                          on="year", how="left")
         comp["outperformance_pp"] = (comp["strategy_pct"] - comp["spy_pct"]).round(2)
     return comp
 

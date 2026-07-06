@@ -20,6 +20,16 @@ def test_yearly_performance_computes_calendar_year_pnl_and_returns():
     assert abs(yp.loc[2022, "pnl"] + 13.2) < 1e-6
 
 
+def test_yearly_performance_reports_intra_year_max_drawdown():
+    idx = pd.to_datetime(["2021-01-04", "2021-03-01", "2021-06-01", "2021-09-01", "2021-12-31"])
+    eq = pd.Series([100.0, 120.0, 90.0, 110.0, 130.0], index=idx)
+
+    yp = yearly_performance(eq).set_index("year")
+    # intra-year peak 120 -> trough 90 = -25% max drawdown; +30% full-year return
+    assert abs(yp.loc[2021, "max_drawdown_pct"] + 25.0) < 1e-6
+    assert abs(yp.loc[2021, "return_pct"] - 30.0) < 1e-6
+
+
 def test_yearly_performance_single_year_uses_first_value_as_base():
     idx = pd.to_datetime(["2023-03-01", "2023-06-01", "2023-12-29"])
     eq = pd.Series([1000.0, 1100.0, 1250.0], index=idx)

@@ -52,12 +52,15 @@ def yearly_performance(equity_curve: pd.Series) -> pd.DataFrame:
     equity_curve: pd.Series indexed by date, values = portfolio value ($).
 
     Returns a DataFrame with one row per calendar year and columns:
-      year, start_value, end_value, pnl, return_pct
+      year, start_value, end_value, pnl, return_pct, max_drawdown_pct
     Each year's base (start_value) is the prior year's ending value; the first
     year uses the curve's first value, so returns compound correctly year over year.
+    max_drawdown_pct is the worst intra-year peak-to-trough decline (<= 0), with
+    the peak reset at the start of each calendar year.
     """
+    cols = ["year", "start_value", "end_value", "pnl", "return_pct", "max_drawdown_pct"]
     if equity_curve.empty:
-        return pd.DataFrame(columns=["year", "start_value", "end_value", "pnl", "return_pct"])
+        return pd.DataFrame(columns=cols)
 
     s = equity_curve.copy()
     s.index = pd.to_datetime(s.index)
@@ -66,6 +69,12 @@ def yearly_performance(equity_curve: pd.Series) -> pd.DataFrame:
     start = end.shift(1)
     start.iloc[0] = s.iloc[0]
 
+    def _intra_year_max_drawdown(x):
+        running_max = x.cummax()
+        return ((x - running_max) / running_max).min() * 100
+
+    mdd = s.groupby(s.index.year).apply(_intra_year_max_drawdown).reindex(end.index)
+
     df = pd.DataFrame({
         "year": end.index.astype(int),
         "start_value": start.to_numpy(),
@@ -73,4 +82,5 @@ def yearly_performance(equity_curve: pd.Series) -> pd.DataFrame:
     })
     df["pnl"] = (df["end_value"] - df["start_value"]).round(2)
     df["return_pct"] = ((df["end_value"] / df["start_value"] - 1.0) * 100).round(2)
+    df["max_drawdown_pct"] = mdd.round(2).to_numpy()
     return df.reset_index(drop=True)
