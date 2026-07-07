@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingstrategy.updateprices</string>
+
+    <!-- Run the incremental daily price refresh. Edit the two paths below to
+         match your machine (see deploy/README.md). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>data.update_prices</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/CHANGE_ME/projects/trading-strategy</string>
+
+    <!-- 17:30 US Eastern is ~90 min after the close; adjust to your local time
+         zone (StartCalendarInterval uses the machine's local time). -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>17</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/CHANGE_ME/projects/trading-strategy/db/update_prices.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/CHANGE_ME/projects/trading-strategy/db/update_prices.err.log</string>
+</dict>
+</plist>

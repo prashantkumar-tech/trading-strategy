@@ -66,6 +66,43 @@ to reduce survivorship bias; transaction-cost modeling; retry the ~68 rate-limit
 
 ---
 
+## Live Portfolio Operations Layer (current focus, added 2026-07)
+
+Turns the momentum research tool into a tool to **operate** the strategy forward: a persistent
+paper portfolio that suggests buys/sells, runs an approve flow (keep/veto/promote), applies the
+rebalance, and tracks performance vs SPY. Phase 1 of a 3-phase vision (2: product-grade UX,
+3: multi-user/externalized). Design + plan: `docs/superpowers/` / plan file.
+
+**Decisions:** decision-support + virtual paper tracker (one engine); *assisted approve flow* for
+selection; fixed-monthly rebalance + interim breach alerts; fresh $10k start; extend Streamlit.
+
+**Key files (new):**
+- `portfolio/state.py` — `Portfolio`/`Position`/`Transaction` dataclasses, JSON-serializable;
+  `new_portfolio()` (also stashes `initial_capital` in config for curve reconstruction).
+- `portfolio/store.py` — JSON persistence to `db/portfolio/<name>.json` (name-keyed; `db/` gitignored).
+- `portfolio/engine.py` — `Ranks` (derives rank/eligible/eligible_rank), `latest_ranks()`,
+  `propose_actions()` (diffs target basket via reused `select_basket`), `apply_rebalance()`
+  (equal-weight, trims-before-buys, logs one txn per fill, conserves value), `check_status()`
+  (monthly rebalance-due + 200-MA/rank-buffer alerts + stale-price guard),
+  `value_portfolio()` (equity curve reconstructed from txns; snapshot values holdings at latest
+  close so day-zero header is right), `previous_trading_day()`/`is_stale()`.
+- `data/update_prices.py` — thin wrapper over the **existing** incremental fetch
+  (`fetch_universe(refresh_mode="incremental")` in `data/fetcher.py` already does since-last-date
+  fetch + MA recompute + upsert); adds `universe_as_of()` freshness read + CLI entry point.
+- `dashboard/portfolio_page.py` + `dashboard/pages/19_💼_Live_Portfolio.py` — create form, freshness
+  banner + Refresh button, status banner, approve-flow editor, holdings, txn log, equity curve.
+- `deploy/com.tradingstrategy.updateprices.plist` + `deploy/README.md` — macOS `launchd` job that
+  runs the daily incremental refresh after the close (cron fallback documented).
+
+**Tests:** `tests/test_portfolio_{state,engine,status}.py`, `tests/test_update_prices.py`
+(23 new; 58 total passing). **Verified** end-to-end in the live app: created a fresh $10k S&P 500
+portfolio, ran the approve flow vetoing MU, applied — equal-weight $1k/name, cash conserved to
+exactly $10k, stale-price guard blocked the rebalance, holdings/txn log/curve rendered.
+
+**Note:** ignores transaction costs/taxes (live forward data avoids survivorship, unlike backtests).
+
+---
+
 ## Completed
 
 ### Phase 1 — Data Pipeline
